@@ -1,0 +1,61 @@
+<Page x:Class="OnvifRecorderInstaller.Pages.EnableSshPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      Title="Enable SSH">
+    <Grid Margin="32">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   Style="{StaticResource H1}"
+                   Text="Step 1 — Enable SSH on your router"/>
+
+        <StackPanel Grid.Row="1">
+            <TextBlock Style="{StaticResource Body}">
+                The installer uses SSH to run apt commands on your UniFi device.
+                If SSH is already enabled with a known password, you can skip
+                ahead — otherwise follow these steps:
+            </TextBlock>
+            <TextBlock Style="{StaticResource Body}" Margin="16,0,0,8">
+                <Run FontWeight="SemiBold">1.</Run>
+                Open the UniFi web UI (e.g. <Run Text="https://192.168.1.1"/>)
+                and sign in as an administrator.<LineBreak/>
+                <Run FontWeight="SemiBold">2.</Run>
+                Go to <Run FontWeight="SemiBold">UniFi OS → System → Advanced</Run>.
+                <LineBreak/>
+                <Run FontWeight="SemiBold">3.</Run>
+                Enable the <Run FontWeight="SemiBold">SSH</Run> toggle.<LineBreak/>
+                <Run FontWeight="SemiBold">4.</Run>
+                Set (or reset) the <Run FontWeight="SemiBold">root</Run> password
+                when prompted. Remember it — you'll need it on the next screen.
+            </TextBlock>
+            <TextBlock Style="{StaticResource Body}"
+                       Foreground="#555">
+                Detailed instructions with screenshots:
+                <Hyperlink NavigateUri="https://help.ui.com/hc/en-us/articles/204909374"
+                           RequestNavigate="Link_RequestNavigate">
+                    help.ui.com
+                </Hyperlink>
+            </TextBlock>
+        </StackPanel>
+
+        <CheckBox Grid.Row="2"
+                  x:Name="Done"
+                  Margin="0,8,0,8"
+                  Content="I've enabled SSH on my router and I know the root password."
+                  Checked="Done_Changed"
+                  Unchecked="Done_Changed"/>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button Content="Back" Click="Back_Click"/>
+            <Button Content="Next" x:Name="NextButton"
+                    IsDefault="True" IsEnabled="False"
+                    Click="Next_Click"/>
+        </StackPanel>
+    </Grid>
+</Page>

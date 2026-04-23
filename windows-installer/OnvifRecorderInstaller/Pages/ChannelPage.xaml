@@ -1,0 +1,61 @@
+<Page x:Class="OnvifRecorderInstaller.Pages.ChannelPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      Title="Channel">
+    <Grid Margin="32">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   Style="{StaticResource H1}"
+                   Text="Step 3 — Choose a release channel"/>
+
+        <StackPanel Grid.Row="1">
+            <TextBlock Style="{StaticResource Body}">
+                onvif-recorder ships in three channels that mirror UniFi
+                Protect's own release channels. Pick the one that matches the
+                Protect channel you're already using — the installer tried to
+                detect this automatically.
+            </TextBlock>
+
+            <TextBlock x:Name="DetectedText" Style="{StaticResource Body}"
+                       Foreground="#555" Text="Detecting…"/>
+
+            <StackPanel Margin="0,8,0,0">
+                <RadioButton x:Name="StableRadio"
+                             GroupName="Channel" Margin="0,4">
+                    <StackPanel>
+                        <TextBlock Text="Stable" FontWeight="SemiBold"/>
+                        <TextBlock Text="Production releases. Recommended for most users."
+                                   Foreground="#555"/>
+                    </StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="RcRadio"
+                             GroupName="Channel" Margin="0,4">
+                    <StackPanel>
+                        <TextBlock Text="Release Candidate" FontWeight="SemiBold"/>
+                        <TextBlock Text="Upcoming releases promoted from early-access."
+                                   Foreground="#555"/>
+                    </StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="EaRadio"
+                             GroupName="Channel" Margin="0,4">
+                    <StackPanel>
+                        <TextBlock Text="Early Access" FontWeight="SemiBold"/>
+                        <TextBlock Text="Bleeding-edge builds on every tag. Match UniFi Protect's Early Access channel."
+                                   Foreground="#555"/>
+                    </StackPanel>
+                </RadioButton>
+            </StackPanel>
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button Content="Back" Click="Back_Click"/>
+            <Button Content="Install" IsDefault="True" Click="Install_Click"/>
+        </StackPanel>
+    </Grid>
+</Page>

@@ -1,0 +1,45 @@
+<Page x:Class="OnvifRecorderInstaller.Pages.WelcomePage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      Title="Welcome">
+    <Grid Margin="32">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   Style="{StaticResource H1}"
+                   Text="ONVIF Recorder Installer"/>
+
+        <StackPanel Grid.Row="1">
+            <TextBlock Style="{StaticResource Body}">
+                This tool installs <Run FontWeight="SemiBold">onvif-recorder</Run>
+                on your UniFi Dream Router or NVR. It subscribes to ONVIF cameras
+                and records their motion/smart-detect events into the UniFi
+                Protect database so third-party cameras appear alongside
+                first-party ones.
+            </TextBlock>
+            <TextBlock Style="{StaticResource Body}">
+                The installer will:
+            </TextBlock>
+            <TextBlock Style="{StaticResource Body}" Margin="16,0,0,8">
+                • Walk you through enabling SSH on your router.<LineBreak/>
+                • Connect over SSH using credentials you provide.<LineBreak/>
+                • Add the onvif-recorder apt repository and install the package.<LineBreak/>
+                • Save your connection details (password encrypted with DPAPI)
+                  so subsequent runs can upgrade or uninstall in one click.
+            </TextBlock>
+            <TextBlock Style="{StaticResource Body}">
+                You can always manage the installed recorder directly from
+                <Run FontWeight="SemiBold">https://&lt;your-device&gt;/onvif/admin/</Run>.
+            </TextBlock>
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button Content="Next" Click="Next_Click" IsDefault="True"/>
+        </StackPanel>
+    </Grid>
+</Page>

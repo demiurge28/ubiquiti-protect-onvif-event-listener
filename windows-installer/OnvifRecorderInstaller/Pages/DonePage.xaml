@@ -1,0 +1,40 @@
+<Page x:Class="OnvifRecorderInstaller.Pages.DonePage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      Title="Done">
+    <Grid Margin="32">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Style="{StaticResource H1}" Text="All set."/>
+
+        <StackPanel Grid.Row="1">
+            <TextBlock Style="{StaticResource Body}"
+                       x:Name="SummaryText"/>
+            <TextBlock Style="{StaticResource Body}">
+                Manage the recorder directly from your router's web UI:
+            </TextBlock>
+            <TextBlock Style="{StaticResource Body}">
+                <Hyperlink x:Name="AdminLink"
+                           RequestNavigate="Link_RequestNavigate">
+                    <Run x:Name="AdminLinkText"/>
+                </Hyperlink>
+            </TextBlock>
+            <TextBlock Style="{StaticResource Body}" Foreground="#555">
+                Automatic upgrades are enabled by default (daily timer).
+                Subsequent launches of this installer will show a dashboard
+                where you can force-check for upgrades, change channels, or
+                uninstall without re-entering credentials.
+            </TextBlock>
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button Content="Dashboard" Click="Dashboard_Click"/>
+            <Button Content="Close" IsDefault="True" Click="Close_Click"/>
+        </StackPanel>
+    </Grid>
+</Page>
