@@ -72,6 +72,17 @@ cc_library(
 )
 
 cc_library(
+    name = "admin_server",
+    srcs = ["src/admin_server.cpp"],
+    hdrs = ["src/admin_server.hpp"],
+    strip_include_prefix = "src",
+    deps = _MHD + [
+        "@com_google_absl//absl/log:log",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "onvif_listener",
     srcs = ["src/onvif_listener.cpp"],
     hdrs = ["src/onvif_listener.hpp"],
@@ -254,6 +265,7 @@ cc_binary(
     srcs = ["src/main.cpp"],
     linkstatic = True,
     deps = [
+        ":admin_server",
         ":alarm_notifier",
         ":camera_change_log",
         ":detection_recorder",

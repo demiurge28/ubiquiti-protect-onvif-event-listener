@@ -329,48 +329,48 @@ absl::Status revert_alarm_picker() {
 }
 
 // ---------------------------------------------------------------
-// Nginx log proxy patch
+// Nginx proxy patches (log viewer + admin page)
 // ---------------------------------------------------------------
 // NOLINTNEXTLINE(whitespace/indent_namespace)
 static const char kNginxConf[] =
     "/data/unifi-core/config/http/site-local-ip.conf";  // NOLINT
 
+// Log viewer markers (pre-existing; kept verbatim for upgrade compat).
 // NOLINTNEXTLINE(whitespace/indent_namespace)
-static const char kMarkerBegin[] =
+static const char kLogMarkerBegin[] =
     "    # --- onvif-recorder log viewer "  // NOLINT
     "(managed by onvif_recorder) ---\n";  // NOLINT
 // NOLINTNEXTLINE(whitespace/indent_namespace)
-static const char kMarkerEnd[] =
+static const char kLogMarkerEnd[] =
     "    # --- end onvif-recorder log viewer ---\n";  // NOLINT
 
-// Build the nginx location block with the given port.
-static std::string build_nginx_block(uint16_t port) {
-  std::string block;
-  block += kMarkerBegin;
-  block += "    location /onvif/events/log {\n";
-  block += "        include "
-           "/usr/share/unifi-core/http/auth.conf;\n";
-  block += "        include "
-           "/usr/share/unifi-core/http/proxy.conf;\n";
-  block += "        proxy_pass http://127.0.0.1:";
-  block += std::to_string(port);
-  block += "/;\n";
-  block += "    }\n";
-  block += kMarkerEnd;
-  return block;
-}
+// Admin page markers.
+// NOLINTNEXTLINE(whitespace/indent_namespace)
+static const char kAdminMarkerBegin[] =
+    "    # --- onvif-recorder admin "  // NOLINT
+    "(managed by onvif_recorder) ---\n";  // NOLINT
+// NOLINTNEXTLINE(whitespace/indent_namespace)
+static const char kAdminMarkerEnd[] =
+    "    # --- end onvif-recorder admin ---\n";  // NOLINT
 
-// Remove any existing marker block from the content string.
-static bool strip_marker_block(std::string* content) {
-  size_t begin = content->find(kMarkerBegin);
-  if (begin == std::string::npos) return false;
-  size_t end = content->find(kMarkerEnd, begin);
-  if (end == std::string::npos) return false;
-  content->erase(begin, end + std::strlen(kMarkerEnd) - begin);
+// Remove any block bounded by @p begin/@p end from @p content.
+static bool strip_block(std::string* content,
+                        const char* begin, const char* end) {
+  size_t b = content->find(begin);
+  if (b == std::string::npos) return false;
+  size_t e = content->find(end, b);
+  if (e == std::string::npos) return false;
+  content->erase(b, e + std::strlen(end) - b);
   return true;
 }
 
-absl::Status patch_nginx_log_proxy(uint16_t port) {
+// Shared: inject @p block just before the closing '}' of the `listen 443`
+// server block in site-local-ip.conf.  @p begin/@p end mark a pre-existing
+// copy to replace.  @p label is used for log messages.
+static absl::Status inject_nginx_block(const std::string& block,
+                                       const char* begin,
+                                       const char* end,
+                                       const char* label) {
   std::string content = read_file(kNginxConf);
   if (content.empty()) {
     return absl::NotFoundError(
@@ -378,36 +378,25 @@ absl::Status patch_nginx_log_proxy(uint16_t port) {
         "-- not running on a Dream Router/NVR?");
   }
 
-  // Always strip any existing block first (may be in the wrong
-  // server block from a prior version), then re-insert.
-  strip_marker_block(&content);
+  strip_block(&content, begin, end);
 
-  // Insert into the first server block (port 443, HTTPS).
-  // The file has multiple server{} blocks; we need the one
-  // with "listen 443".  Find it, then find its closing '}'.
   size_t s443 = content.find("listen 443");
   if (s443 == std::string::npos) {
     return absl::InternalError(
         "cannot find 'listen 443' in nginx config");
   }
-  // Find the closing '}' for this server block.  Since the
-  // 443 block uses include directives (no nested braces in
-  // the config file itself), the first '}' after "listen 443"
-  // closes it.
   size_t brace = content.find('}', s443);
   if (brace == std::string::npos) {
     return absl::InternalError(
         "cannot find closing brace for 443 server");
   }
 
-  std::string block = build_nginx_block(port);
   content.insert(brace, block);
 
-  // If the file already has exactly this content, skip the write.
   {
     std::string on_disk = read_file(kNginxConf);
     if (on_disk == content) {
-      LOG(INFO) << "[nginx] log proxy block already present";
+      LOG(INFO) << "[nginx] " << label << " block already present";
       return absl::OkStatus();
     }
   }
@@ -415,42 +404,76 @@ absl::Status patch_nginx_log_proxy(uint16_t port) {
   if (!write_file(kNginxConf, content)) {
     return absl::InternalError("failed to write nginx config");
   }
+  LOG(INFO) << "[nginx] injected " << label << " block";
 
-  LOG(INFO) << "[nginx] injected log proxy block (port "
-            << port << ")";
-
-  // Reload nginx to pick up the change.
   int rc = std::system("nginx -s reload 2>/dev/null");  // NOLINT
   if (rc != 0)
     LOG(WARNING) << "[nginx] reload returned " << rc;
-
   return absl::OkStatus();
 }
 
-absl::Status revert_nginx_log_proxy() {
+// Shared: strip a block and reload nginx.
+static absl::Status strip_nginx_block(const char* begin,
+                                      const char* end,
+                                      const char* label) {
   std::string content = read_file(kNginxConf);
   if (content.empty()) {
     LOG(INFO) << "[nginx] config not found -- nothing to revert";
     return absl::OkStatus();
   }
-
-  if (!strip_marker_block(&content)) {
-    LOG(INFO) << "[nginx] no log proxy block found "
-              << "-- nothing to revert";
+  if (!strip_block(&content, begin, end)) {
+    LOG(INFO) << "[nginx] no " << label
+              << " block found -- nothing to revert";
     return absl::OkStatus();
   }
-
   if (!write_file(kNginxConf, content)) {
     return absl::InternalError("failed to write nginx config");
   }
-
-  LOG(INFO) << "[nginx] removed log proxy block";
+  LOG(INFO) << "[nginx] removed " << label << " block";
 
   int rc = std::system("nginx -s reload 2>/dev/null");  // NOLINT
   if (rc != 0)
     LOG(WARNING) << "[nginx] reload returned " << rc;
-
   return absl::OkStatus();
+}
+
+absl::Status patch_nginx_log_proxy(uint16_t port) {
+  std::string block;
+  block += kLogMarkerBegin;
+  block += "    location /onvif/events/log {\n";
+  block += "        include /usr/share/unifi-core/http/auth.conf;\n";
+  block += "        include /usr/share/unifi-core/http/proxy.conf;\n";
+  block += "        proxy_pass http://127.0.0.1:";
+  block += std::to_string(port);
+  block += "/;\n";
+  block += "    }\n";
+  block += kLogMarkerEnd;
+  return inject_nginx_block(block, kLogMarkerBegin, kLogMarkerEnd,
+                            "log proxy");
+}
+
+absl::Status revert_nginx_log_proxy() {
+  return strip_nginx_block(kLogMarkerBegin, kLogMarkerEnd, "log proxy");
+}
+
+absl::Status patch_nginx_admin_proxy(uint16_t port) {
+  std::string block;
+  block += kAdminMarkerBegin;
+  block += "    location /onvif/admin/ {\n";
+  block += "        include /usr/share/unifi-core/http/auth.conf;\n";
+  block += "        include /usr/share/unifi-core/http/proxy.conf;\n";
+  block += "        proxy_pass http://127.0.0.1:";
+  block += std::to_string(port);
+  block += "/;\n";
+  block += "    }\n";
+  block += kAdminMarkerEnd;
+  return inject_nginx_block(block, kAdminMarkerBegin, kAdminMarkerEnd,
+                            "admin proxy");
+}
+
+absl::Status revert_nginx_admin_proxy() {
+  return strip_nginx_block(kAdminMarkerBegin, kAdminMarkerEnd,
+                           "admin proxy");
 }
 
 }  // namespace protect_ui

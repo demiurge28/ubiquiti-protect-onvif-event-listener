@@ -55,4 +55,13 @@ absl::Status patch_nginx_log_proxy(uint16_t port);
 /// Remove the injected nginx location block and reload nginx.
 absl::Status revert_nginx_log_proxy();
 
+/// Inject an nginx `location /onvif/admin/` block into site-local-ip.conf
+/// proxying authenticated requests to the in-process admin server on
+/// localhost:@p port.  Paired with revert_nginx_admin_proxy() invoked from the
+/// Debian prerm script.
+absl::Status patch_nginx_admin_proxy(uint16_t port);
+
+/// Remove the injected nginx admin location block and reload nginx.
+absl::Status revert_nginx_admin_proxy();
+
 }  // namespace protect_ui

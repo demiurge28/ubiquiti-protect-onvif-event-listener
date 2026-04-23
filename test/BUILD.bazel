@@ -242,6 +242,14 @@ cc_test(
 )
 
 cc_test(
+    name = "test_admin_server",
+    srcs = ["test_admin_server.cpp"],
+    deps = [
+        "//:admin_server",
+    ],
+)
+
+cc_test(
     name = "test_motion_poller",
     srcs = ["test_motion_poller.cpp"],
     linkstatic = True,

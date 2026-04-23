@@ -52,7 +52,15 @@
 #include "detection_recorder.hpp"
 #include "event_recorder.hpp"
 #include "log_ring.hpp"
+#include "admin_server.hpp"
 #include "log_server.hpp"
+
+// Fallback version string when running outside a .deb install. The admin UI
+// prefers `dpkg-query -W -f='${Version}' onvif-recorder` at request time and
+// only falls back to this constant if the package is not installed.
+#ifndef ONVIF_RECORDER_VERSION
+#define ONVIF_RECORDER_VERSION "dev"
+#endif
 #include "motion_poller.hpp"
 #include "object_detect.hpp"
 #include "onvif_listener.hpp"
@@ -183,6 +191,11 @@ ABSL_FLAG(bool, patch_alarm_picker, true,
 ABSL_FLAG(uint16_t, log_port, 7890,
     "TCP port for the in-memory log viewer (loopback only). "
     "Served via nginx at /onvif/events/log with Protect auth.");
+ABSL_FLAG(uint16_t, admin_port, 7891,
+    "TCP port for the package admin page (loopback only). "
+    "Served via nginx at /onvif/admin/ with Protect auth.");
+ABSL_FLAG(std::string, channel_file, "/etc/onvif-recorder/channel",
+    "Path to the APT-channel selector file read/written by the admin page.");
 
 // ============================================================
 // Signal handling
@@ -381,6 +394,11 @@ int main(int argc, char* argv[]) {
     if (!ng_s.ok())
       LOG(WARNING) << "[rollback] " << ng_s.message();
 
+    // Revert nginx admin proxy block.
+    auto ng_a = protect_ui::revert_nginx_admin_proxy();
+    if (!ng_a.ok())
+      LOG(WARNING) << "[rollback] " << ng_a.message();
+
     return 0;
   }
 
@@ -406,6 +424,19 @@ int main(int argc, char* argv[]) {
       LOG(WARNING) << "[log_server] nginx patch: " << ng.message();
   } else {
     LOG(WARNING) << "[log_server] failed to start on port " << log_port;
+  }
+
+  // Start the admin page (loopback HTTP, proxied at /onvif/admin/).
+  onvif::AdminServer admin_server;
+  const uint16_t admin_port = absl::GetFlag(FLAGS_admin_port);
+  const std::string channel_file = absl::GetFlag(FLAGS_channel_file);
+  if (admin_server.start(ONVIF_RECORDER_VERSION, channel_file, admin_port)) {
+    LOG(INFO) << "[admin_server] listening on 127.0.0.1:" << admin_port;
+    auto ng_a = protect_ui::patch_nginx_admin_proxy(admin_port);
+    if (!ng_a.ok())
+      LOG(WARNING) << "[admin_server] nginx patch: " << ng_a.message();
+  } else {
+    LOG(WARNING) << "[admin_server] failed to start on port " << admin_port;
   }
 
   // Open the change log if configured.
