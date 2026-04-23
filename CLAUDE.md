@@ -212,21 +212,40 @@ scripts/bz test --config=x86 //test:all
 
 ### Required release assets
 
-- `onvif_recorder_arm64` — ARM64 release binary (PGO + ThinLTO) built at the tagged commit
-- `onvif-recorder.service` — systemd service file (in the repo root)
-- `onvif-recorder_<ver>_arm64.deb` — Debian package built via `scripts/build-deb.sh --arch=arm64`.
-- `OnvifRecorderInstaller-v<ver>.exe` — Windows installer (self-contained win-x64 single-file exe).
+Every `v*` release MUST ship these two assets, and only these two:
 
-The `release-deb.yml` GitHub Actions workflow builds the `.deb`, uploads it
-to the release, and publishes to the `early-access` suite of the gh-pages
-apt repo automatically on every `v*` tag push.
+- `onvif-recorder_<ver>_arm64.deb` — Debian package (ARM64). Built via
+  `scripts/build-deb.sh --arch=arm64` or `./build-in-docker.sh --deb`.
+  Uploaded automatically by `.github/workflows/release-deb.yml`, which
+  also publishes it into the `early-access` suite of the gh-pages apt
+  repo.
+- `OnvifRecorderInstaller-v<ver>.exe` — Windows installer (self-contained
+  win-x64 single-file .NET 8 WPF exe). Uploaded automatically by
+  `.github/workflows/release-windows.yml` (runs on `windows-2022`).
 
-The `release-windows.yml` workflow builds and uploads the Windows installer
-on the same `v*` tag push (runs on `windows-2022`, publishes a self-contained
-.NET 8 WPF single-file exe).
+Both workflows fire on every `v*` tag push, so a correct release is:
+push the tag, wait for both workflows to finish, then verify both
+assets landed via `gh release view v<X.Y.Z>`.
 
-Keep the raw binary + service file as assets for 2–3 releases during the
-legacy-install transition.
+The raw ARM64 binary (`onvif_recorder_arm64`) and the bare
+`onvif-recorder.service` are NO LONGER release assets — the `.deb` is
+the supported distribution path and bundles both.
+
+### Uninstall behaviour (--rollback)
+
+`debian/prerm` runs `/usr/bin/onvif-recorder --rollback=all` on
+`apt-get remove` (but not on upgrade) before the binary is deleted, so
+the package cleans up after itself:
+
+- reverts the nginx `/onvif/events/log` and `/onvif/admin/` location
+  blocks (from `protect_ui_patch::revert_nginx_{log,admin}_proxy`);
+- restores Protect's `swai.js` from the `.bak` written at patch time
+  (from `protect_ui_patch::revert_alarm_picker`);
+- rolls back cameras-table changes recorded in `--change_log`.
+
+`apt-get purge` additionally wipes `/etc/onvif-recorder`,
+`/var/lib/onvif-recorder`, the systemd timer drop-ins, and the
+apt source.
 
 ### APT suite promotion
 

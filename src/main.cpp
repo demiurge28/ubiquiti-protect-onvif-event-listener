@@ -380,13 +380,17 @@ int main(int argc, char* argv[]) {
     // Force verbose for rollback output.
     absl::SetMinLogLevel(absl::LogSeverityAtLeast::kInfo);
 
+    // Cameras-table rollback: best-effort.  On package removal the DB may
+    // already be down, but we still want the UI/nginx reverts below to run.
     auto result = unifi::rollback_camera_changes(
         rollback, change_log, fp_camera_ids, cam_db);
     if (!result.ok()) {
-      LOG(ERROR) << "Fatal: " << result.status().message();
-      return 1;
+      LOG(WARNING) << "[rollback] cameras-table: "
+                   << result.status().message();
+    } else {
+      LOG(INFO) << "[rollback] cameras-table: " << *result
+                << " camera(s) updated";
     }
-    LOG(INFO) << "[rollback] complete, " << *result << " camera(s) updated";
 
     // Revert Protect UI patches if they were applied.
     auto ui_s = protect_ui::revert_alarm_picker();

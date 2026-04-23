@@ -193,18 +193,27 @@ runs, investigate and resolve the cause — bypassing the hook is not an option.
 then verified with `gh release view`.
 
 ### Required release assets
-- `onvif_recorder_arm64` — ARM64 release binary (PGO + ThinLTO) built at the tagged commit
-- `onvif-recorder.service` — systemd service file
-- `onvif-recorder_<ver>_arm64.deb` — Debian package (built via `scripts/build-deb.sh` or `./build-in-docker.sh --deb`)
-- `OnvifRecorderInstaller-v<ver>.exe` — Windows installer (self-contained win-x64)
+Every `v*` release MUST ship exactly these two assets:
+- `onvif-recorder_<ver>_arm64.deb` — Debian package (ARM64), uploaded by
+  `.github/workflows/release-deb.yml` and also published to the
+  `early-access` apt-repo suite. Promotion to `rc` and `stable` is
+  manual (`promote.yml`).
+- `OnvifRecorderInstaller-v<ver>.exe` — Windows installer (self-contained
+  win-x64 single-file .NET 8 WPF exe), uploaded by
+  `.github/workflows/release-windows.yml`. Source in `windows-installer/`.
 
-The `release-deb.yml` workflow attaches the `.deb` automatically and publishes
-it to the `early-access` suite of the gh-pages apt repo. Promotion to `rc` and
-`stable` is manual (`promote.yml`).
+The raw `onvif_recorder_arm64` binary and the bare `onvif-recorder.service`
+are NO LONGER release assets — the `.deb` is the supported distribution
+path and bundles both. Both workflows fire on the same `v*` tag push.
 
-The `release-windows.yml` workflow attaches the `.exe` automatically on the
-same `v*` tag (builds on `windows-2022`, publishes a single-file .NET 8 WPF
-exe). Source lives in `windows-installer/`.
+### Uninstall behaviour (--rollback)
+`debian/prerm` runs `/usr/bin/onvif-recorder --rollback=all` on
+`apt-get remove` (not on upgrade) before the binary is deleted, so the
+package cleans up after itself: reverts the nginx `/onvif/events/log`
+and `/onvif/admin/` location blocks, restores `swai.js` from the `.bak`,
+and rolls back cameras-table changes recorded in `--change_log`.
+`apt-get purge` additionally wipes `/etc/onvif-recorder`,
+`/var/lib/onvif-recorder`, systemd timer drop-ins, and the apt source.
 
 ### Required release notes
 Every release must include:
