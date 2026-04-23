@@ -1,0 +1,29 @@
+Origin: onvif-recorder
+Label: onvif-recorder
+Suite: stable
+Codename: stable
+Version: 1.0
+Architectures: arm64
+Components: main
+Description: onvif-recorder stable channel
+SignWith: yes
+
+Origin: onvif-recorder
+Label: onvif-recorder
+Suite: rc
+Codename: rc
+Version: 1.0
+Architectures: arm64
+Components: main
+Description: onvif-recorder release candidate channel
+SignWith: yes
+
+Origin: onvif-recorder
+Label: onvif-recorder
+Suite: early-access
+Codename: early-access
+Version: 1.0
+Architectures: arm64
+Components: main
+Description: onvif-recorder early access channel
+SignWith: yes
