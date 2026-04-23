@@ -99,13 +99,14 @@ ABSL_FLAG(std::string, raw_log, "",
 ABSL_FLAG(std::string, protect_url, "http://localhost:7080",
     "Base URL for the local Protect API used to trigger automations "
     "(e.g. 'Make Sound for detection') on smart detection events.");
-ABSL_FLAG(std::string, msr_url, "",
+ABSL_FLAG(std::string, msr_url, "http://127.0.0.1:7700",
     "Base URL for the local UniFi Media Server Recording (MSR) gRPC "
-    "service, e.g. 'http://127.0.0.1:7700'.  When set, detection "
-    "thumbnails are forwarded via RecordingAPI.StoreSnapshots so that "
-    "MSR stores them as native UBV files owned by ms:unifi-streaming — "
-    "making third-party thumbnails indistinguishable from first-party "
-    "camera thumbnails in the Protect UI.  Empty (default) disables.");
+    "service.  Detection thumbnails are forwarded via "
+    "RecordingAPI.StoreSnapshots so that MSR stores them as native UBV "
+    "files owned by ms:unifi-streaming — making third-party thumbnails "
+    "indistinguishable from first-party camera thumbnails in the "
+    "Protect UI.  Default 'http://127.0.0.1:7700' works out of the box "
+    "on UniFi Dream Routers/NVRs; set to empty string to disable.");
 ABSL_FLAG(int32_t, backfill_msr_thumbnails, 60,
     "Migrate pre-MSR third-party thumbnails from the `thumbnails` table "
     "into native MSR-backed storage by re-uploading each JPEG via "

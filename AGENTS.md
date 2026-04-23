@@ -187,18 +187,35 @@ runs, investigate and resolve the cause — bypassing the hook is not an option.
 
 ## Release checklist
 
-Every GitHub release **must** include these assets:
+**NON-NEGOTIABLE.** A release without release notes and both assets is broken.
+`git tag` alone is NOT a release — it must be followed immediately by
+`gh release create` with `--notes` and both assets in the same invocation,
+then verified with `gh release view`.
+
+### Required release assets
 - `onvif_recorder_arm64` — ARM64 release binary (PGO + ThinLTO) built at the tagged commit
 - `onvif-recorder.service` — systemd service file
 
-Steps:
-1. Tag the commit: `git tag v<X.Y.Z> && git push origin v<X.Y.Z>`
-2. Build: `scripts/bz build --config=arm64_release //:onvif_recorder`
-3. Create release with `gh release create` and upload the binary from
-   `~/.cache/bazel/arm64_release/execroot/_main/bazel-out/k8-fastbuild/bin/onvif_recorder`
-   plus `onvif-recorder.service`.
+### Required release notes
+Every release must include:
+- **Highlights** — one paragraph per notable change, written for end users
+- **New flags** — table of new CLI flags with defaults
+- **Migration notes** — anything an upgrading user must do (or that happens automatically)
+- **Dependencies** — any new third_party additions
 
-Do not create a release without attaching the ARM64 binary and service file.
+### Steps (single session, in order)
+1. Tag and push: `git tag v<X.Y.Z> && git push origin v<X.Y.Z>`
+2. Build: `scripts/bz build --config=arm64_release //:onvif_recorder`
+3. Verify auth BEFORE publishing: `gh auth status` — re-auth if expired.
+   Never publish without the assets and notes because `gh` was offline.
+4. `gh release create v<X.Y.Z> --title "v<X.Y.Z>" --notes "$(…)"` with both
+   assets (`onvif_recorder#onvif_recorder_arm64` and `onvif-recorder.service`)
+   attached in the same command.
+5. **Verify**: `gh release view v<X.Y.Z> --json name,body,assets` — body must
+   be non-empty; assets must include both files. If not, fix immediately with
+   `gh release edit` / `gh release upload`.
+
+Refer to `CLAUDE.md` for the exact command templates.
 
 ---
 

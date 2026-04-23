@@ -203,27 +203,68 @@ scripts/bz test --config=x86 //test:all
 
 ## Release checklist
 
-When creating a new GitHub release:
+> **NON-NEGOTIABLE for every release.** A release without release notes and
+> both binary + service-file assets is a broken release. `git tag` alone is
+> NOT a release — it must be followed by `gh release create` with `--notes`
+> and both assets in the same invocation, then verified via `gh release view`.
+> If `gh` is unauthenticated, stop and re-authenticate (`gh auth login -h
+> github.com`) — never publish a release without the assets and notes.
+
+### Required release assets
+
+- `onvif_recorder_arm64` — ARM64 release binary (PGO + ThinLTO) built at the tagged commit
+- `onvif-recorder.service` — systemd service file (in the repo root)
+
+### Required release notes
+
+Every release must have meaningful notes covering:
+- **Highlights** — one paragraph per notable change, written for end users
+- **New flags** — table of any new CLI flags with defaults and descriptions
+- **Migration notes** — anything a user upgrading must do (or that happens automatically)
+- **Dependencies** — any new third_party additions
+
+### Steps (execute in order, in a single session)
 
 ```bash
-# 1. Tag the release commit
+# 1. Tag the release commit and push
 git tag v<X.Y.Z>
 git push origin v<X.Y.Z>
 
 # 2. Build the ARM64 release binary (PGO + ThinLTO)
 scripts/bz build --config=arm64_release //:onvif_recorder
 
-# 3. Create the release with assets
+# 3. Verify gh is authenticated BEFORE creating the release
+gh auth status || { echo "Re-auth required"; exit 1; }
+
+# 4. Create the release with notes + BOTH assets in one invocation
 gh release create v<X.Y.Z> \
   --title "v<X.Y.Z>" \
-  --notes "release notes here" \
+  --notes "$(cat <<'NOTES'
+## Highlights
+...
+
+## New flags
+| Flag | Default | Description |
+|------|---------|-------------|
+| ... | ... | ... |
+
+## Migration notes
+...
+NOTES
+)" \
   ~/.cache/bazel/arm64_release/execroot/_main/bazel-out/k8-fastbuild/bin/onvif_recorder#onvif_recorder_arm64 \
   onvif-recorder.service
+
+# 5. POST-RELEASE VERIFICATION (mandatory — do not skip)
+gh release view v<X.Y.Z> --json name,body,assets --jq \
+  '{name, body_chars: (.body | length), assets: [.assets[].name]}'
+#   -> body_chars must be > 0
+#   -> assets must include both "onvif_recorder_arm64" and "onvif-recorder.service"
 ```
 
-**Required release assets:**
-- `onvif_recorder_arm64` — ARM64 release binary built at the tagged commit
-- `onvif-recorder.service` — systemd service file
+If step 5 shows empty notes or missing assets, repair immediately with
+`gh release edit v<X.Y.Z> --notes-file NOTES.md` and
+`gh release upload v<X.Y.Z> <path>#<asset_name>` before doing anything else.
 
 ## Command-line flags (runtime)
 
@@ -253,7 +294,7 @@ All configuration is now via `absl::flags`. Pass `--help` for the full list.
 | `--rollback` | _(empty)_ | Undo cameras-table changes and exit. Values: `third_party`, `first_party`, `all`. |
 | `--protect_url` | `http://localhost:7080` | Base URL for the local Protect API used to trigger automations on smart detection events. |
 | `--protect_user_id` | _(auto-discovered)_ | X-UserId header for Protect API auth bypass. Auto-discovered from unifi-core DB on first run and cached to `/root/.config/onvif-recorder-api-key`. Pass explicitly to override. |
-| `--msr_url` | _(empty = disabled)_ | Base URL for the local UniFi Media Server Recording (MSR) gRPC service, e.g. `http://127.0.0.1:7700`. When set, detection thumbnails are forwarded via `RecordingAPI.StoreSnapshots` so MSR persists them as native UBV files owned by `ms:unifi-streaming`, making third-party thumbnails indistinguishable from first-party camera thumbnails. |
+| `--msr_url` | `http://127.0.0.1:7700` | Base URL for the local UniFi Media Server Recording (MSR) gRPC service. Detection thumbnails are forwarded via `RecordingAPI.StoreSnapshots` so MSR persists them as native UBV files owned by `ms:unifi-streaming`, making third-party thumbnails indistinguishable from first-party. Set to empty string to disable. |
 | `--patch_alarm_picker` | `true` | Live-patch the Protect UI to allow third-party cameras in the alarm creation picker. Re-applied on every startup so it survives firmware updates. |
 
 Logging uses absl/log. `--verbose` calls `absl::SetMinLogLevel(kInfo)`; default is `kError`.
