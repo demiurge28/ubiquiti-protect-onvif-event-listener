@@ -90,6 +90,9 @@ ABSL_FLAG(bool, verbose, false,
 ABSL_FLAG(std::string, model_dir, "/root/models",
     "Directory containing nanodet_m.param and nanodet_m.bin. "
     "Models are downloaded automatically if not present.");
+ABSL_FLAG(std::string, state_dir, "/var/lib/onvif-recorder",
+    "Directory for persistent runtime state (API-key cache, etc.). "
+    "Created on first run if missing.");
 ABSL_FLAG(bool, detect, true,
     "Enable NanoDet-M object detection for thumbnail cropping. "
     "Runs as fallback when the camera provides no ONVIF bounding box.");
@@ -693,8 +696,31 @@ int main(int argc, char* argv[]) {
   // AlarmNotifier: triggers Protect automations (e.g. chime play) on detections.
   // Auto-discover user ID if not explicitly set via flag.
   std::string protect_user_id = absl::GetFlag(FLAGS_protect_user_id);
-  if (protect_user_id.empty())
-    protect_user_id = onvif::discover_protect_user_id();
+  if (protect_user_id.empty()) {
+    const std::string state_dir = absl::GetFlag(FLAGS_state_dir);
+    (void)mkdir(state_dir.c_str(), 0755);
+    const std::string cache_path = state_dir + "/protect-user-id";
+
+    // Defense-in-depth: migrate from the pre-Debian-package location if the
+    // new cache file is missing but the legacy one exists.  postinst should
+    // have handled this already on package upgrade; this catches the case
+    // where the user runs the binary without going through the package.
+    struct stat st;
+    if (stat(cache_path.c_str(), &st) != 0) {
+      const char kLegacyPath[] = "/root/.config/onvif-recorder-api-key";
+      std::ifstream in(kLegacyPath, std::ios::binary);
+      if (in.is_open()) {
+        std::ofstream out(cache_path, std::ios::binary);
+        if (out.is_open()) {
+          out << in.rdbuf();
+          LOG(INFO) << "[alarm] migrated cache " << kLegacyPath
+                    << " -> " << cache_path;
+        }
+      }
+    }
+
+    protect_user_id = onvif::discover_protect_user_id(cache_path);
+  }
 
   std::unique_ptr<onvif::AlarmNotifier> alarm_notifier;
   if (!protect_user_id.empty()) {

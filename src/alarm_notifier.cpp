@@ -529,26 +529,22 @@ void AlarmNotifier::notify(const std::string& obj_type,
 // ---------------------------------------------------------------------------
 // discover_protect_user_id()
 //
-// Reads the cached user ID from `/root/.config/onvif-recorder-api-key`.  If the
-// cache is missing, queries the unifi-core PostgreSQL database on port 5432 for
-// the first row of `user_settings.user_id` and writes the result back to the
-// cache for subsequent runs.
+// Reads the cached user ID from `cache_path`.  If missing, queries the
+// unifi-core PostgreSQL database on port 5432 for the first row of
+// `user_settings.user_id` and writes it back to `cache_path`.  The parent
+// directory of `cache_path` is created (mkdir 0755) as needed.
 // ---------------------------------------------------------------------------
-namespace {
-constexpr const char kApiKeyPath[] = "/root/.config/onvif-recorder-api-key";
-}  // namespace
-
-std::string discover_protect_user_id() {
+std::string discover_protect_user_id(const std::string& cache_path) {
   // 1. Try reading cached value.
   {
-    std::ifstream f(kApiKeyPath);
+    std::ifstream f(cache_path);
     std::string line;
     if (f.is_open() && std::getline(f, line) && line.size() >= 32) {
       while (!line.empty() && (line.back() == '\n' || line.back() == '\r' ||
                                line.back() == ' '))
         line.pop_back();
       if (!line.empty()) {
-        LOG(INFO) << "[alarm] loaded user ID from " << kApiKeyPath;
+        LOG(INFO) << "[alarm] loaded user ID from " << cache_path;
         return line;
       }
     }
@@ -581,13 +577,16 @@ std::string discover_protect_user_id() {
 
   // 3. Cache to disk for future runs.
   {
-    (void)mkdir("/root/.config", 0755);
-    std::ofstream f(kApiKeyPath);
+    const size_t slash = cache_path.find_last_of('/');
+    if (slash != std::string::npos && slash > 0) {
+      (void)mkdir(cache_path.substr(0, slash).c_str(), 0755);
+    }
+    std::ofstream f(cache_path);
     if (f.is_open()) {
       f << user_id << '\n';
-      LOG(INFO) << "[alarm] saved user ID to " << kApiKeyPath;
+      LOG(INFO) << "[alarm] saved user ID to " << cache_path;
     } else {
-      LOG(ERROR) << "[alarm] could not write " << kApiKeyPath;
+      LOG(ERROR) << "[alarm] could not write " << cache_path;
     }
   }
   return user_id;

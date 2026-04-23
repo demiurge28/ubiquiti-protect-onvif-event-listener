@@ -24,18 +24,18 @@
 
 namespace onvif {
 
-/// Read the cached Protect API user ID from the config file, or discover it
-/// from the unifi-core PostgreSQL database and save it.
+/// Read the cached Protect API user ID from `cache_path`, or discover it from
+/// the unifi-core PostgreSQL database and save it back to `cache_path`.
 ///
-/// The cached value is stored at `/root/.config/onvif-recorder-api-key` (one
-/// user_id string per line).  When absent, discover_protect_user_id() connects
-/// to `host=/run/postgresql port=5432 dbname=unifi-core user=postgres` and
-/// reads `SELECT user_id FROM user_settings LIMIT 1`, then writes the result
-/// to the cache file for subsequent runs.
+/// The cache file stores one user_id string per line.  When absent,
+/// discover_protect_user_id() connects to `host=/run/postgresql port=5432
+/// dbname=unifi-core user=postgres` and reads `SELECT user_id FROM
+/// user_settings LIMIT 1`, then writes the result to `cache_path` for
+/// subsequent runs.  The parent directory is created (mkdir 0755) if missing.
 ///
 /// Returns the empty string on failure (no cache file, DB unreachable, or no
 /// rows in user_settings).
-std::string discover_protect_user_id();
+std::string discover_protect_user_id(const std::string& cache_path);
 
 /**
  * AlarmNotifier
@@ -86,6 +86,10 @@ class AlarmNotifier {
     bool cooldown_enabled = false;
     uint64_t cooldown_ms = 0;
   };
+
+  // Grant the white-box test access to the private static parser and the
+  // AutomationEntry layout. Defined in test/test_alarm_notifier.cpp.
+  friend struct AlarmNotifierTest;
 
   std::string protect_url_;
   std::string user_id_;

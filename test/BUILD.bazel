@@ -242,6 +242,14 @@ cc_test(
 )
 
 cc_test(
+    name = "test_alarm_notifier",
+    srcs = ["test_alarm_notifier.cpp"],
+    deps = [
+        "//:alarm_notifier",
+    ],
+)
+
+cc_test(
     name = "test_admin_server",
     srcs = ["test_admin_server.cpp"],
     deps = [
