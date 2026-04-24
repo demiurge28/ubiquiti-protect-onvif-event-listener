@@ -26,8 +26,10 @@
 #include <sys/sysinfo.h>
 #include <sys/utsname.h>
 
+#include <atomic>
 #include <cstdio>
 #include <csignal>
+#include <chrono>  // NOLINT(build/c++11)
 #include <fstream>
 #include <map>
 #include <memory>
@@ -801,6 +803,15 @@ int main(int argc, char* argv[]) {
     LOG(INFO) << "Watching camera " << cam.ip;
   }
 
+  if (cameras.empty() && !motion_poller) {
+    LOG(WARNING) << "No third-party cameras found in Protect and no "
+                 << "first-party cameras configured for motion polling; "
+                 << "service will stay alive but idle. Add a third-party "
+                 << "ONVIF camera in Protect or pass "
+                 << "--first_party_cameras / --first_party_camera_models "
+                 << "to do useful work.";
+  }
+
   if (!raw_log.empty())
     listener.enable_raw_recording(raw_log);
 
@@ -810,12 +821,58 @@ int main(int argc, char* argv[]) {
     motion_poller->start();
   }
 
+  // Background rescan thread: periodically re-query Protect's cameras
+  // table and hot-add any cameras that appear after startup.  Lets users
+  // add a third-party camera in Protect without restarting the service.
+  std::atomic<bool> rescan_running{true};
+  std::set<std::string> known_ids;
+  for (const auto& c : cameras) known_ids.insert(c.id);
+  std::thread rescan_thread([&]() {
+    constexpr int kPollSec = 60;
+    while (rescan_running) {
+      for (int i = 0; i < kPollSec && rescan_running; ++i)
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+      if (!rescan_running) break;
+
+      auto reloaded = unifi::load_cameras(cam_db);
+      if (!reloaded.ok()) {
+        LOG(WARNING) << "[rescan] load_cameras: "
+                     << reloaded.status().message();
+        continue;
+      }
+      std::vector<onvif::CameraConfig> fresh;
+      for (const auto& c : *reloaded)
+        if (!known_ids.count(c.id)) fresh.push_back(c);
+      if (fresh.empty()) continue;
+
+      LOG(INFO) << "[rescan] detected " << fresh.size()
+                << " new third-party camera(s)";
+      if (auto s = unifi::enable_smart_detect(fresh, cam_db, cam_log);
+          !s.ok())
+        LOG(WARNING) << "[rescan] enable_smart_detect: " << s.message();
+      if (auto s = unifi::ensure_smart_detect_zones(fresh, cam_db, cam_log);
+          !s.ok())
+        LOG(WARNING) << "[rescan] ensure_smart_detect_zones: "
+                     << s.message();
+      for (auto cam : fresh) {
+        cam.max_consecutive_failures = 3;
+        known_ids.insert(cam.id);
+        det_rec.set_snapshot(cam);
+        listener.add_camera_live(cam);
+        LOG(INFO) << "Watching camera " << cam.ip;
+      }
+    }
+  });
+
   listener.run([event_rec, &det_rec](const onvif::OnvifEvent& ev) {
     if (event_rec) event_rec->write(ev);
     det_rec.on_event(ev);
   });
 
   // Clean shutdown.
+  rescan_running = false;
+  if (rescan_thread.joinable())
+    rescan_thread.join();
   if (motion_poller)
     motion_poller->stop();
   if (backfill_thread.joinable())

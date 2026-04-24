@@ -97,7 +97,7 @@ static void test_apply_patches() {
 
   // Build content containing all three UI patch originals.
   std::string content = "prefix_";
-  content += kUiPatch1.original;
+  content += kUiPatch1a.original;
   content += "_middle_";
   content += kUiPatch2.original;
   content += "_gap_";
@@ -112,7 +112,7 @@ static void test_apply_patches() {
 
   // Verify replacements.
   std::string patched = read_test_file(path);
-  check(patched.find(kUiPatch1.replacement) != std::string::npos,
+  check(patched.find(kUiPatch1a.replacement) != std::string::npos,
         "patch1 replacement present");
   check(patched.find(kUiPatch2.replacement) != std::string::npos,
         "patch2 replacement present");
@@ -120,7 +120,7 @@ static void test_apply_patches() {
         "patch3 replacement present");
 
   // Original strings should be gone.
-  check(patched.find(kUiPatch1.original) == std::string::npos,
+  check(patched.find(kUiPatch1a.original) == std::string::npos,
         "patch1 original removed");
 
   // File size should be unchanged (same-length replacements).
@@ -144,7 +144,7 @@ static void test_already_patched() {
 
   // Content already has the replacement strings.
   std::string content = "prefix_";
-  content += kUiPatch1.replacement;
+  content += kUiPatch1a.replacement;
   content += "_middle_";
   content += kUiPatch2.replacement;
   content += "_suffix";
@@ -214,7 +214,7 @@ static void test_dpkg_backup_logic() {
   std::remove(bak.c_str());
 
   std::string content = "prefix_";
-  content += kUiPatch1.original;
+  content += kUiPatch1a.original;
   content += "_suffix";
 
   write_test_file(path, content);
@@ -250,7 +250,7 @@ static void test_partial_patch() {
 
   // Only include patch 1, not patches 2 or 3.
   std::string content = "header_";
-  content += kUiPatch1.original;
+  content += kUiPatch1a.original;
   content += "_footer";
 
   write_test_file(path, content);
@@ -260,7 +260,7 @@ static void test_partial_patch() {
   check(n == 1, "partial: only 1 patch applied");
 
   std::string patched = read_test_file(path);
-  check(patched.find(kUiPatch1.replacement) != std::string::npos,
+  check(patched.find(kUiPatch1a.replacement) != std::string::npos,
         "partial: patch1 applied");
 
   std::remove(path.c_str());

@@ -530,6 +530,51 @@ static void test_both_cameras(const std::string& hikvision_jsonl,
 }
 
 // ============================================================
+// Test: hot-add a camera while run() is already executing
+// ============================================================
+static void test_hot_add(const std::string& jsonl) {
+  HikvisionCompatibleEmulator emu(jsonl);
+  emu.start();
+
+  onvif::CameraConfig cfg;
+  cfg.ip                 = emu.local_address();
+  cfg.user               = "admin";
+  cfg.password           = "eW6iO01l";
+  cfg.retry_interval_sec = 1;
+
+  onvif::OnvifListener listener;
+  // Intentionally no add_camera() before run() -- zero workers at start.
+
+  std::mutex mu;
+  std::condition_variable cv;
+  std::vector<onvif::OnvifEvent> evs;
+
+  std::thread t([&] {
+    listener.run([&](const onvif::OnvifEvent& ev) {
+      std::lock_guard<std::mutex> lk(mu);
+      evs.push_back(ev);
+      if (evs.size() >= 3) cv.notify_one();
+    });
+  });
+
+  // Give run() a beat to enter its supervisor loop with zero workers.
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  listener.add_camera_live(cfg);
+
+  bool ok;
+  {
+    std::unique_lock<std::mutex> lk(mu);
+    ok = cv.wait_for(lk, std::chrono::seconds(30),
+                     [&] { return evs.size() >= 3; });
+  }
+
+  listener.stop();
+  t.join();
+
+  CHECK(ok, "hot-added camera did not produce events");
+}
+
+// ============================================================
 // main
 // ============================================================
 int main(int argc, char* argv[]) {
@@ -572,6 +617,8 @@ int main(int argc, char* argv[]) {
 
   run_test("hikvision_basic",
            [&] { test_hikvision_basic(hikvision_jsonl); });
+  run_test("hot_add",
+           [&] { test_hot_add(hikvision_jsonl); });
   run_test("hikvision_changed_events",
            [&] { test_hikvision_changed_events(hikvision_jsonl); });
   run_test("dahua_retries",

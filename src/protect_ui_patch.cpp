@@ -63,7 +63,7 @@ static const Patch kUiPatch3 = {
 "return!0/*isThirdPartyCamera||this.isPairedWithAiPort*/", 55};
 
 static const Patch kUiPatches[] = {
-    kUiPatch1a, kUiPatch1b, kUiPatch2, kUiPatch3};
+kUiPatch1a, kUiPatch1b, kUiPatch2, kUiPatch3};
 static constexpr size_t kUiPatchCount = 4;
 
 // --- Backend patches (service.js) ---

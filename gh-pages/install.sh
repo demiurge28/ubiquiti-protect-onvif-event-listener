@@ -32,6 +32,25 @@ case "$DEB_ARCH" in
         ;;
 esac
 
+# Return 0 iff $REPO_URL/dists/$1/Release exists (HTTP 200).
+suite_exists() {
+    curl -fsI -o /dev/null "$REPO_URL/dists/$1/Release" 2>/dev/null
+}
+
+# Pick the first suite in the preference list that actually has a published
+# Release file.  Falls back gracefully when a channel hasn't been cut yet
+# (the common failure mode is `stable` missing because a release is still
+# in `rc` or `early-access`).
+select_available_suite() {
+    for candidate in "$@"; do
+        if suite_exists "$candidate"; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # 1. GPG keyring.
 echo "==> Fetching signing key ..."
 mkdir -p /usr/share/keyrings
@@ -40,16 +59,38 @@ gpg --dearmor < /tmp/onvif-recorder.gpg > "$KEYRING"
 chmod 0644 "$KEYRING"
 rm -f /tmp/onvif-recorder.gpg
 
-# 2. Channel detection (best effort; falls back to stable).
+# 2. Channel detection.
+# Priority order for the default install:
+#   preferred (existing channel file, if set and valid) -> stable -> rc -> early-access.
+# If a suite's Release file isn't published yet, drop through to the next one
+# rather than writing a dead channel that'd 404 on apt-get update.
 mkdir -p /etc/onvif-recorder
-if [ ! -f "$CHANNEL_FILE" ]; then
-    echo "stable" > "$CHANNEL_FILE"
+PREFERRED=""
+if [ -f "$CHANNEL_FILE" ]; then
+    PREFERRED=$(tr -d '[:space:]' < "$CHANNEL_FILE")
 fi
-CHANNEL=$(tr -d '[:space:]' < "$CHANNEL_FILE")
-case "$CHANNEL" in
+case "$PREFERRED" in
     stable|rc|early-access) ;;
-    *) CHANNEL=stable; echo "stable" > "$CHANNEL_FILE" ;;
+    *) PREFERRED="" ;;
 esac
+
+if [ -n "$PREFERRED" ]; then
+    CHANNEL=$(select_available_suite "$PREFERRED" stable rc early-access) || CHANNEL=""
+else
+    CHANNEL=$(select_available_suite stable rc early-access) || CHANNEL=""
+fi
+
+if [ -z "$CHANNEL" ]; then
+    echo "No published apt suite reachable at $REPO_URL (stable/rc/early-access all 404)." >&2
+    echo "Check your network or wait for the next release to be promoted." >&2
+    exit 1
+fi
+
+if [ -n "$PREFERRED" ] && [ "$CHANNEL" != "$PREFERRED" ]; then
+    echo "==> Preferred channel '$PREFERRED' not yet published; using '$CHANNEL'"
+fi
+
+echo "$CHANNEL" > "$CHANNEL_FILE"
 echo "==> Using channel: $CHANNEL"
 
 # 3. APT source.

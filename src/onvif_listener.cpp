@@ -721,6 +721,18 @@ class CameraWorker {
                            << "] CreatePullPointSubscription HTTP "
                            << resp.status_code << ": "
                            << resp.body.substr(0, 300);
+      // Event-subscription auth often needs a dedicated ONVIF user
+      // (e.g. Hikvision: Configuration -> Network -> Advanced Settings ->
+      // Integration Protocol -> ONVIF), even when GetServices succeeds
+      // with the admin credentials.  Surface a clearer hint.
+      if (resp.body.find("NotAuthorized") != std::string::npos) {
+        LOG_FIRST_N(ERROR, 1)
+            << '[' << cfg_.ip << "] PullPoint subscription rejected as "
+            << "NotAuthorized -- some cameras (notably Hikvision) require "
+            << "a dedicated ONVIF user to be created in the camera's web UI "
+            << "with Administrator role, then that user's credentials "
+            << "configured in Protect.";
+      }
       return Subscription{};
     }
 
@@ -906,6 +918,11 @@ void OnvifListener::add_camera(const CameraConfig& cfg) {
   cameras_.push_back(cfg);
 }
 
+void OnvifListener::add_camera_live(const CameraConfig& cfg) {
+  std::lock_guard<std::mutex> lock(pending_mutex_);
+  pending_cameras_.push_back(cfg);
+}
+
 void OnvifListener::enable_raw_recording(const std::string& path) {
   raw_path_ = path;
 }
@@ -942,16 +959,38 @@ void OnvifListener::run(EventCallback cb) {
   }
 
   // Block until stop() is called or every worker finishes on its own
-  // (e.g. max_consecutive_failures reached).
+  // (e.g. max_consecutive_failures reached).  When there are no workers
+  // (no third-party cameras configured in Protect) keep running until
+  // stop() so the service stays alive for the motion poller, log server,
+  // admin page, etc. instead of exiting silently.  Also drain any cameras
+  // hot-added via add_camera_live() since the last tick.
   while (running_) {
-    bool all_done = true;
-    for (auto& w : workers) {
-      if (!w->finished()) {
-        all_done = false;
-        break;
+    // Drain pending hot-added cameras.
+    {
+      std::vector<CameraConfig> hot_adds;
+      {
+        std::lock_guard<std::mutex> lock(pending_mutex_);
+        hot_adds.swap(pending_cameras_);
+      }
+      for (auto& cfg : hot_adds) {
+        cameras_.push_back(cfg);
+        workers.push_back(
+            std::make_unique<CameraWorker>(cfg, cb, running_, raw));
+        CameraWorker* ptr = workers.back().get();
+        threads.emplace_back([ptr] { ptr->run(); });
       }
     }
-    if (all_done) break;
+
+    if (!workers.empty()) {
+      bool all_done = true;
+      for (auto& w : workers) {
+        if (!w->finished()) {
+          all_done = false;
+          break;
+        }
+      }
+      if (all_done) break;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
   }
 

@@ -17,6 +17,7 @@
 #include <atomic>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -111,6 +112,13 @@ class OnvifListener {
     /// Register a camera before calling run().
     void add_camera(const CameraConfig& cfg);
 
+    /// Register a camera while run() is already executing.  Safe to call
+    /// from any thread.  The new camera is picked up on the next tick of
+    /// run()'s supervisor loop (within ~250ms) and a subscription worker
+    /// thread is spawned for it.  Intended for hot-adding cameras that
+    /// appear in Protect's database after startup.
+    void add_camera_live(const CameraConfig& cfg);
+
     /// Enable raw HTTP recording. Every SOAP request and its response are
     /// written as JSON Lines to @p path (one object per exchange). Must be
     /// called before run(). Disabled when not called.
@@ -137,6 +145,11 @@ class OnvifListener {
     std::atomic<bool>         running_{false};
     std::vector<CameraConfig> cameras_;
     std::string               raw_path_;   // empty = raw recording disabled
+
+    // Queue of cameras added via add_camera_live() after run() started.
+    // Drained by run()'s supervisor loop under pending_mutex_.
+    std::mutex                pending_mutex_;
+    std::vector<CameraConfig> pending_cameras_;
 };
 
 }  // namespace onvif

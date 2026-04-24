@@ -16,8 +16,14 @@
 # suites (stable | rc | early-access). If the file is missing or
 # unparseable we leave the existing /etc/onvif-recorder/channel alone
 # (or default to stable on first run).
+#
+# We also probe the apt repo: if the preferred suite has no Release file
+# published yet (happens while a release is still only in early-access),
+# drop through to the next best available suite instead of writing a
+# dead channel that would 404 on apt-get update.
 set -e
 
+REPO_URL="${ONVIF_REPO_URL:-https://danielwoz.github.io/ubiquiti-protect-onvif-event-listener}"
 CHANNEL_FILE=/etc/onvif-recorder/channel
 RUNNABLES=${ONVIF_RUNNABLES_YAML:-/data/unifi-core/config/runnables.yaml}
 
@@ -25,6 +31,23 @@ mkdir -p "$(dirname "$CHANNEL_FILE")"
 if [ ! -f "$CHANNEL_FILE" ]; then
     echo "stable" > "$CHANNEL_FILE"
 fi
+
+# Return 0 iff $REPO_URL/dists/$1/Release exists (HTTP 200).
+suite_exists() {
+    curl -fsI -o /dev/null "$REPO_URL/dists/$1/Release" 2>/dev/null
+}
+
+# Pick the first suite in the priority list that has a published Release.
+# Echoes the suite name on stdout, or nothing on total failure.
+select_available_suite() {
+    for candidate in "$@"; do
+        if suite_exists "$candidate"; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
 
 [ -r "$RUNNABLES" ] || exit 0
 
@@ -42,15 +65,34 @@ RAW=$(awk '
 ' "$RUNNABLES" 2>/dev/null | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
 
 case "$RAW" in
-    release)           NEW=stable ;;
-    release-candidate) NEW=rc ;;
-    beta|early-access) NEW="early-access" ;;
+    release)           PREFERRED=stable ;;
+    release-candidate) PREFERRED=rc ;;
+    beta|early-access) PREFERRED=early-access ;;
     *) exit 0 ;;  # unknown / empty — keep previous value
 esac
 
+# Prefer the detected channel, but fall back through stable -> rc ->
+# early-access if the preferred suite isn't reachable.
+NEW=$(select_available_suite "$PREFERRED" stable rc early-access) || NEW=""
+
+if [ -z "$NEW" ]; then
+    # Couldn't reach any suite (network down, rare).  Leave the existing
+    # channel file alone so we don't replace a working value with an
+    # unreachable one.
+    logger -t onvif-recorder-channel \
+        "no apt suites reachable at $REPO_URL; keeping existing channel"
+    exit 0
+fi
+
 if [ "$(cat "$CHANNEL_FILE" 2>/dev/null)" != "$NEW" ]; then
     echo "$NEW" > "$CHANNEL_FILE"
-    logger -t onvif-recorder-channel "Protect channel detected as $NEW (runnables.yaml=$RAW)"
+    if [ "$NEW" != "$PREFERRED" ]; then
+        logger -t onvif-recorder-channel \
+            "Protect channel detected as $PREFERRED (runnables.yaml=$RAW); using $NEW as fallback"
+    else
+        logger -t onvif-recorder-channel \
+            "Protect channel detected as $NEW (runnables.yaml=$RAW)"
+    fi
 fi
 
 exit 0

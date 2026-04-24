@@ -182,14 +182,11 @@ absl::StatusOr<std::vector<onvif::CameraConfig>> load_cameras(
     cam.user     = username;
     cam.password = password;
 
-    if (!snapshot_url.empty()) {
-      const auto scheme_end = snapshot_url.find("://");
-      const auto path_start =
-          (scheme_end == std::string::npos) ? 0 : scheme_end + 3;
-      const auto slash = snapshot_url.find('/', path_start);
-      cam.snapshot_url = cam.http_base()
-          + ((slash == std::string::npos) ? "/" : snapshot_url.substr(slash));
-    }
+    // Use Protect's stored URL verbatim: the snapshot endpoint often lives
+    // on a different port from the ONVIF service (e.g. ONVIF on 8000, HTTP
+    // snapshot CGI on 80), so reconstructing the host via the ONVIF port
+    // yields the wrong URL.
+    cam.snapshot_url = std::move(snapshot_url);
 
     cameras.push_back(cam);
   }
