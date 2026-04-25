@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <string>
+
 #include "absl/status/status.h"
 
 namespace protect_ui {
@@ -42,6 +44,14 @@ absl::Status patch_alarm_picker();
 /// if a .bak exists it is copied back over the patched version.
 /// Returns OK with the number of files restored.
 absl::Status revert_alarm_picker();
+
+/// Test seam for revert_alarm_picker(): operate on a custom UI dist
+/// directory (containing swai*.js / vantage*.js + their .bak siblings)
+/// and an explicit service.js path.  Used by unit tests to avoid
+/// touching /usr/share/unifi-protect.
+absl::Status revert_alarm_picker_in(
+    const std::string& ui_dir,
+    const std::string& service_path);
 
 /// Inject an nginx `location /onvif/events/log` block into the UniFi OS
 /// site-local-ip.conf (HTTPS server) that proxies authenticated requests

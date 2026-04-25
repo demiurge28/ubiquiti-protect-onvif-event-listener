@@ -150,6 +150,13 @@ restarts the service so changes take effect immediately.</p>
 <div class="row"><button onclick="saveConfig()">Save &amp; restart</button></div>
 <div class="msg" id="config-msg"></div></div>
 
+<div class="card"><h2>Recent events</h2>
+<p class="desc" style="font-size:12px;color:#9aa0a6;margin:0 0 8px 0">
+Last 30 events.  Thumbnail previews show only when the snapshot was
+written to Protect's <code>thumbnails</code> table; events whose
+thumbnails were forwarded to MSR show a small marker instead.</p>
+<div id="recent-events-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">Loading…</div></div>
+
 <div class="card"><h2>Diagnostics</h2>
 <p class="desc" style="font-size:12px;color:#9aa0a6;margin:0 0 8px 0">
 Download a tar.gz of recent journal output, current config, camera-health
@@ -429,12 +436,59 @@ async function loadCameraHealth(){
   }
 }
 
+// --- Recent events panel ---
+function fmtClock(ms){
+  if (!ms) return '';
+  const d = new Date(ms);
+  const pad = n => String(n).padStart(2, '0');
+  return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+function shortDate(ms){
+  const d = new Date(ms);
+  const m = d.getMonth() + 1, day = d.getDate();
+  return m + '/' + day;
+}
+async function loadRecentEvents(){
+  try {
+    const r = captureCsrf(await fetch('api/recent_events'));
+    const j = await r.json();
+    const root = document.getElementById('recent-events-list');
+    if (!j.events || !j.events.length){
+      root.innerHTML = '<div style="color:#7a8190">No recent events.</div>';
+      return;
+    }
+    root.innerHTML = j.events.map(ev => {
+      const thumb = ev.thumbnail_in_db
+        ? '<img src="api/thumbnail?id=' + encodeURIComponent(ev.thumbnail_id)
+            + '" style="width:100%;height:90px;object-fit:cover;border-radius:4px;background:#0e1118" '
+            + 'onerror="this.style.display=\'none\'" loading="lazy">'
+        : '<div style="height:90px;display:flex;align-items:center;justify-content:center;'
+            + 'background:#0e1118;border:1px dashed #2a3140;border-radius:4px;color:#5a6172;font-size:11px">'
+            + 'MSR</div>';
+      const sdt = (ev.sdt && ev.sdt.length)
+        ? ev.sdt.join(',')
+        : ev.type;
+      return `<div style="font-size:11px;color:#c6c9cc">
+        ${thumb}
+        <div style="margin-top:4px"><span style="color:#8be9fd">${sdt}</span></div>
+        <div style="color:#9aa0a6">${ev.camera_name || '-'}</div>
+        <div style="color:#7a8190">${shortDate(ev.start_ms)} ${fmtClock(ev.start_ms)}</div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    document.getElementById('recent-events-list').innerHTML =
+      '<div style="color:#e0a0a0">Failed to load events.</div>';
+  }
+}
+
 fetchStatus();
 loadFirstPartyCameras();
 loadConfig();
 loadCameraHealth();
+loadRecentEvents();
 setInterval(fetchStatus, 30000);
 setInterval(loadCameraHealth, 30000);
+setInterval(loadRecentEvents, 30000);
 </script>
 </body></html>
 )HTML";
@@ -806,6 +860,46 @@ std::string build_camera_health_json(const Ctx& ctx) {
   return j;
 }
 
+// Build JSON for GET /api/recent_events.  Calls unifi::load_recent_events
+// and shapes the rows for the admin UI.  Each row carries a
+// `thumbnail_url` that the UI can drop into <img src=...>; empty when the
+// thumbnail isn't in the DB (MSR-stored events show a placeholder).
+std::string build_recent_events_json(const Ctx& ctx) {
+  std::string j = "{\"events\":[";
+  if (ctx.db == nullptr) {
+    j += "]}";
+    return j;
+  }
+  auto rows_or = unifi::load_recent_events(30, *ctx.db);
+  if (!rows_or.ok()) {
+    LOG(WARNING) << "[admin] load_recent_events: "
+                 << rows_or.status().message();
+    j += "]}";
+    return j;
+  }
+  bool first = true;
+  for (const auto& r : *rows_or) {
+    if (!first) j += ',';
+    first = false;
+    j += "{\"id\":\"";   j += json_escape(r.id);
+    j += "\",\"type\":\""; j += json_escape(r.type);
+    j += "\",\"camera_id\":\""; j += json_escape(r.camera_id);
+    j += "\",\"camera_name\":\""; j += json_escape(r.camera_name);
+    j += "\",\"thumbnail_id\":\""; j += json_escape(r.thumbnail_id);
+    j += "\",\"sdt\":";
+    j += r.smart_detect_types_json.empty()
+             ? std::string("[]")
+             : r.smart_detect_types_json;
+    j += ",\"start_ms\":"; j += std::to_string(r.start_ms);
+    j += ",\"end_ms\":";   j += std::to_string(r.end_ms);
+    j += ",\"thumbnail_in_db\":";
+    j += r.thumbnail_in_db ? "true" : "false";
+    j += "}";
+  }
+  j += "]}";
+  return j;
+}
+
 // Build JSON for GET /api/first_party_cameras.
 std::string build_first_party_json(const Ctx& ctx) {
   std::string j = "{\"cameras\":[";
@@ -1006,6 +1100,33 @@ MHD_Result handler(
              std::strcmp(url, "/api/camera_health") == 0) {
     body = build_camera_health_json(*ctx);
     content_type = "application/json";
+  } else if (is_get &&
+             std::strcmp(url, "/api/recent_events") == 0) {
+    body = build_recent_events_json(*ctx);
+    content_type = "application/json";
+  } else if (is_get &&
+             std::strncmp(url, "/api/thumbnail", 14) == 0) {
+    // /api/thumbnail?id=<thumb_id>.  Returns 404 if not in DB
+    // (MSR-stored thumbnails are not exposed via this endpoint).
+    const char* qs = MHD_lookup_connection_value(
+        connection, MHD_GET_ARGUMENT_KIND, "id");
+    if (qs == nullptr || qs[0] == '\0' || ctx->db == nullptr) {
+      status = 400;
+      body = "missing id";
+    } else {
+      auto bytes_or = unifi::load_thumbnail_bytes(qs, *ctx->db);
+      if (!bytes_or.ok()) {
+        status = 500;
+        body = std::string(bytes_or.status().message());
+      } else if (bytes_or->empty()) {
+        status = 404;
+        body = "thumbnail not in DB (MSR-stored or unknown id)";
+      } else {
+        body.assign(reinterpret_cast<const char*>(bytes_or->data()),
+                    bytes_or->size());
+        content_type = "image/jpeg";
+      }
+    }
   } else if (is_get &&
              std::strcmp(url, "/api/diagnostic_dump") == 0) {
     const std::string tar_path = "/tmp/onvif-dump.tar.gz";

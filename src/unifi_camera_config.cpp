@@ -300,6 +300,109 @@ absl::StatusOr<std::vector<CameraHealth>> load_camera_health(
 }
 
 // ---------------------------------------------------------------------------
+// load_recent_events (admin UI Recent Events panel)
+// ---------------------------------------------------------------------------
+
+absl::StatusOr<std::vector<RecentEvent>>
+load_recent_events(int limit, const DbConfig& db) {
+  PgConn pg(db);
+  if (!pg.ok())
+    return absl::InternalError("unifi::load_recent_events: " + pg.error());
+
+  // Cap the limit to prevent abuse / runaway queries.
+  if (limit <= 0)  limit = 30;
+  if (limit > 200) limit = 200;
+  const std::string limit_str = std::to_string(limit);
+
+  // smartDetectZone covers the classified events the UI cares about; we
+  // also include motion (only first-party that we haven't classified yet)
+  // for visibility into the motion_poller backlog.  thumbnailId may be
+  // null on stuck-open rows; skip those.
+  const char* sql =
+    "SELECT e.id, e.type, e.\"cameraId\", "
+    "       COALESCE(c.name, ''), "
+    "       COALESCE(e.\"thumbnailId\", ''), "
+    "       COALESCE(e.\"smartDetectTypes\"::text, '[]'), "
+    "       COALESCE(e.start, 0)::bigint, "
+    "       COALESCE(e.\"end\", 0)::bigint, "
+    "       EXISTS(SELECT 1 FROM thumbnails t "
+    "              WHERE t.id = e.\"thumbnailId\") AS in_db "
+    "FROM events e "
+    "LEFT JOIN cameras c ON c.id = e.\"cameraId\" "
+    "WHERE e.type IN "
+    "      ('smartDetectZone','smartDetectLine','smartAudioDetect','motion') "
+    "  AND e.\"thumbnailId\" IS NOT NULL "
+    "ORDER BY e.start DESC "
+    "LIMIT $1";
+  const char* params[] = { limit_str.c_str() };
+
+  PGresult* res = PQexecParams(pg.conn, sql, 1, nullptr, params,
+                               nullptr, nullptr, 0);
+  if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+    std::string err = PQresultErrorMessage(res);
+    PQclear(res);
+    return absl::InternalError(
+        "unifi::load_recent_events query: " + err);
+  }
+  std::vector<RecentEvent> rows;
+  int n = PQntuples(res);
+  for (int i = 0; i < n; ++i) {
+    RecentEvent r;
+    r.id           = PQgetvalue(res, i, 0);
+    r.type         = PQgetvalue(res, i, 1);
+    r.camera_id    = PQgetvalue(res, i, 2);
+    r.camera_name  = PQgetvalue(res, i, 3);
+    r.thumbnail_id = PQgetvalue(res, i, 4);
+    r.smart_detect_types_json = PQgetvalue(res, i, 5);
+    r.start_ms     = static_cast<uint64_t>(
+        std::stoull(PQgetvalue(res, i, 6)));
+    r.end_ms       = static_cast<uint64_t>(
+        std::stoull(PQgetvalue(res, i, 7)));
+    r.thumbnail_in_db = std::string(PQgetvalue(res, i, 8)) == "t";
+    rows.push_back(std::move(r));
+  }
+  PQclear(res);
+  return rows;
+}
+
+// ---------------------------------------------------------------------------
+// load_thumbnail_bytes (admin UI thumbnail proxy)
+// ---------------------------------------------------------------------------
+
+absl::StatusOr<std::vector<uint8_t>> load_thumbnail_bytes(
+    const std::string& thumbnail_id, const DbConfig& db) {
+  if (thumbnail_id.empty())
+    return absl::InvalidArgumentError("empty thumbnail_id");
+
+  PgConn pg(db);
+  if (!pg.ok())
+    return absl::InternalError("unifi::load_thumbnail_bytes: " + pg.error());
+
+  // Binary fetch: column 0 returned in binary mode.
+  const char* params[] = { thumbnail_id.c_str() };
+  const int   formats[] = { 0 };
+  (void)formats;
+  PGresult* res = PQexecParams(pg.conn,
+      "SELECT content FROM thumbnails WHERE id = $1",
+      1, nullptr, params, nullptr, nullptr, /*resultFormat=*/1);
+  if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+    std::string err = PQresultErrorMessage(res);
+    PQclear(res);
+    return absl::InternalError(
+        "unifi::load_thumbnail_bytes query: " + err);
+  }
+  if (PQntuples(res) == 0 || PQgetisnull(res, 0, 0)) {
+    PQclear(res);
+    return std::vector<uint8_t>{};  // miss; caller decides what to do
+  }
+  const char* raw = PQgetvalue(res, 0, 0);
+  const int   len = PQgetlength(res, 0, 0);
+  std::vector<uint8_t> out(raw, raw + len);
+  PQclear(res);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // load_all_first_party (admin UI tickbox list)
 // ---------------------------------------------------------------------------
 

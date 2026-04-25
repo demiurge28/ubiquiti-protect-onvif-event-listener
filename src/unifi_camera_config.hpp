@@ -106,6 +106,33 @@ struct CameraHealth {
 absl::StatusOr<std::vector<CameraHealth>>  // NOLINT(whitespace/indent_namespace)
 load_camera_health(const DbConfig& db = {});
 
+/// Recent-event row used by the admin UI's Recent Events panel.
+struct RecentEvent {
+  std::string id;
+  std::string type;
+  std::string camera_id;
+  std::string camera_name;
+  std::string thumbnail_id;     ///< empty when no thumbnail
+  std::string smart_detect_types_json;  ///< raw JSON, e.g. ["person"]
+  uint64_t    start_ms{0};
+  uint64_t    end_ms{0};
+  bool        thumbnail_in_db{false};   ///< true if thumbnails.id == thumbnail_id
+};
+
+/// Last @p limit smart-detect events (smartDetectZone / smartDetectLine /
+/// smartAudioDetect / motion) ordered by start DESC.  Skips events with no
+/// thumbnail_id.  Used by /api/recent_events.
+absl::StatusOr<std::vector<RecentEvent>>  // NOLINT(whitespace/indent_namespace)
+load_recent_events(int limit = 30, const DbConfig& db = {});
+
+/// Read a thumbnail blob from the thumbnails table.  Returns the raw JPEG
+/// bytes, or an empty vector on miss / error.  MSR-stored thumbnails (IDs
+/// of length != 24) are not in this table; callers should treat misses as
+/// "MSR-stored, fetch via MSR" and may show a placeholder.
+absl::StatusOr<std::vector<uint8_t>>  // NOLINT(whitespace/indent_namespace)
+load_thumbnail_bytes(const std::string& thumbnail_id,
+                     const DbConfig& db = {});
+
 /// Search for adopted first-party cameras whose `type` column contains any
 /// of the given @p model_substrings (case-insensitive ILIKE match).
 /// For example, passing {"G3 Instant"} matches cameras with type

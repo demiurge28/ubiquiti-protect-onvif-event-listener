@@ -268,6 +268,48 @@ static void test_partial_patch() {
 }
 
 // ---------------------------------------------------------------
+// Test: revert_alarm_picker_in restores files byte-for-byte from .bak.
+// Simulates the production sequence: write original -> apply (creates
+// .bak + modifies live) -> revert -> live must equal original.
+// ---------------------------------------------------------------
+static void test_revert_byte_for_byte() {
+  const std::string ui_dir = temp_dir() + "/ui_revert_test";
+  std::system(("rm -rf " + ui_dir + " && mkdir -p " + ui_dir).c_str());
+
+  // Build a minimal swai.js containing the v1.4.3+ patch1a pattern.
+  std::string original;
+  original += "/* head */\n";
+  original += kUiPatch1a.original;
+  original += "\n/* tail */\n";
+  // Pad to 1 KiB to make any drift byte-detectable.
+  original.resize(1024, ' ');
+
+  const std::string live_path = ui_dir + "/swai.js";
+  check(write_test_file(live_path, original), "write swai.js original");
+
+  std::unordered_map<std::string, std::string> empty_md5;
+  int n = apply_patches(live_path, kUiPatches, kUiPatchCount, empty_md5);
+  check(n >= 1, "apply produced at least 1 replacement");
+
+  // Sanity: live file is now patched, .bak holds the original.
+  std::string patched = read_test_file(live_path);
+  check(patched != original, "live file modified by apply");
+  check(read_test_file(live_path + ".bak") == original,
+        ".bak holds the original byte-for-byte");
+
+  // Revert from the test-only directory, no service.js path.
+  auto s = revert_alarm_picker_in(ui_dir, /*service_path=*/"");
+  const std::string revert_msg =
+      std::string("revert ok: ") + std::string(s.message());
+  check(s.ok(), revert_msg.c_str());
+
+  std::string restored = read_test_file(live_path);
+  check(restored == original, "live file restored byte-for-byte");
+
+  std::system(("rm -rf " + ui_dir).c_str());
+}
+
+// ---------------------------------------------------------------
 // Test: nginx block injection places the block inside the server
 // block, not inside a previously-injected location block.
 // Regression for the v1.4.3/v1.4.4 bug where the admin-proxy block
@@ -352,6 +394,7 @@ int main() {
   test_backend_patch();
   test_dpkg_backup_logic();
   test_partial_patch();
+  test_revert_byte_for_byte();
   test_nginx_inject_not_nested();
   test_nginx_inject_no_server();
 

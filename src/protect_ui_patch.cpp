@@ -305,7 +305,8 @@ absl::Status patch_alarm_picker() {
   return absl::OkStatus();
 }
 
-absl::Status revert_alarm_picker() {
+absl::Status revert_alarm_picker_in(const std::string& ui_dir,
+                                     const std::string& service_path) {
   auto md5sums = load_dpkg_md5sums();
   int restored = 0;
 
@@ -342,12 +343,13 @@ absl::Status revert_alarm_picker() {
 
   // Revert all swai*.js.bak and vantage*.js.bak in the UI dist directory.
   for (const char* prefix : {"swai", "vantage"}) {
-    for (const auto& path : find_ui_files(kUiDir, prefix))
+    for (const auto& path : find_ui_files(ui_dir.c_str(), prefix))
       try_restore(path);
   }
 
   // Revert service.js.
-  try_restore(kServicePath);
+  if (!service_path.empty())
+    try_restore(service_path);
 
   if (restored > 0) {
     LOG(INFO) << "[ui_patch] reverted " << restored << " file(s)";
@@ -356,6 +358,10 @@ absl::Status revert_alarm_picker() {
   }
 
   return absl::OkStatus();
+}
+
+absl::Status revert_alarm_picker() {
+  return revert_alarm_picker_in(kUiDir, kServicePath);
 }
 
 // ---------------------------------------------------------------
