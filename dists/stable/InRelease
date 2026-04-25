@@ -1,0 +1,40 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Origin: onvif-recorder
+Label: onvif-recorder
+Suite: stable
+Codename: stable
+Version: 1.0
+Date: Sat, 25 Apr 2026 15:36:25 UTC
+Architectures: arm64
+Components: main
+Description: onvif-recorder stable channel
+MD5Sum:
+ 8fc6eb2a6af5ca9e0a2773bb63c4fe68 984 main/binary-arm64/Packages
+ 82e0bb6050778bff6026293dbc76a337 622 main/binary-arm64/Packages.gz
+ 5b0d463a62135a82f3c045bd284dabda 153 main/binary-arm64/Release
+SHA1:
+ 148fc7343ec49b9054e64c82f29633879f04e0f4 984 main/binary-arm64/Packages
+ a88e7e20defde3a4de44a15374b9df8abc78032b 622 main/binary-arm64/Packages.gz
+ 602e4d1942e7372479e6bc986b3c24ce07bd25a5 153 main/binary-arm64/Release
+SHA256:
+ 8d894c5533cde2b927076202c49ed54f083d375fc744177f924383c0a1470d8b 984 main/binary-arm64/Packages
+ 93d1605ae8bd61ff9ceea0924d3dc567226941434d97d41cbdb27fb0df19012d 622 main/binary-arm64/Packages.gz
+ b44ba30daf8e3d33127ee15a9ce8185a34461185153db4211fd70824bee58d19 153 main/binary-arm64/Release
+-----BEGIN PGP SIGNATURE-----
+
+iQIzBAEBCgAdFiEEppQhR+JB3iqGS85rXQujy8Eq0qIFAmns33kACgkQXQujy8Eq
+0qKVJg//dnr9FtXD8YJH+yaVfTmZQtJEJC2nlYjVs56tdVp6/u7Lfvqoxt3ia25s
+5CrCvCKFV3/5nhRghA98tTzXDHF/XbCQpxm6xfDI3enEg+MJ5WbcdpQIeAxkUhrQ
+r3u9+1lQniQUijOyU/H9yLdsVUM9QWS38FEI8WJ8RcIZ6PP7PJFFfLyOQKnA5ZVv
+0BqsCT/0ADABbg7QIBhSRKjBmpNySluzd+t2/K6g2qpevVbklqTlDYA2crYpjNEp
+v55C/+UOsjexgjaAhBd/OhkrWgFitsGPYlrLYrIoMIlmbXj1lP9oA1pk1hSYq1IB
+7f3nEx7DaEs5ReK3b88DYSB4umlFMwkdNCnjmSU8+TZkkfBJcCZr33Jtk/2/ZM/n
+WwIUHN6uQQGl4QQtICN5GR3Ae1BNgTDJR0Tng4iKmvMQQCjLP3VLQb78ywAnbOel
+x/jriYo93F9VxjVT2MpowdD9LEeHydRbD94oOT2oYNlleX3NK+KQ21BxLVG5hndR
+t8K3UJ+TTStebm7pY2ZY6tn3Pq+dQuOqxVaMnXEXgpQhJPgeQtCZtbcAYBLZzkhY
+vBJAFJOi6bQ+xjD+rcyFjEfgg8fwm5rW89CRXBF6fT7XkdomI7Q2VHwVZ0Wb07Wq
+6TUdxPiwRXBt7c6ZWAUTZRfHyOzlRweXcD94uAv7Ce7RfR5YBI4=
+=lsOT
+-----END PGP SIGNATURE-----
