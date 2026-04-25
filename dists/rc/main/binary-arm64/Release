@@ -1,0 +1,7 @@
+Archive: rc
+Version: 1.0
+Component: main
+Origin: onvif-recorder
+Label: onvif-recorder
+Architecture: arm64
+Description: onvif-recorder release candidate channel
