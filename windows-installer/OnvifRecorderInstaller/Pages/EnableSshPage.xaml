@@ -20,16 +20,32 @@
                 If SSH is already enabled with a known password, you can skip
                 ahead — otherwise follow these steps:
             </TextBlock>
-            <TextBlock Style="{StaticResource Body}" Margin="16,0,0,8">
+            <TextBlock Style="{StaticResource Body}" Margin="16,0,0,4">
                 <Run FontWeight="SemiBold">1.</Run>
-                Open the UniFi web UI (e.g. <Run Text="https://192.168.1.1"/>)
-                and sign in as an administrator.<LineBreak/>
+                Open the SSH settings page in the UniFi web UI:
+            </TextBlock>
+            <TextBlock Style="{StaticResource Body}" Margin="32,0,0,8">
+                <Hyperlink x:Name="ConsoleLink"
+                           RequestNavigate="Link_RequestNavigate">
+                    <Run x:Name="ConsoleLinkText"
+                         Text="(detecting your router…)"/>
+                </Hyperlink>
+            </TextBlock>
+            <StackPanel Orientation="Horizontal" Margin="32,0,0,8">
+                <TextBlock Style="{StaticResource Body}"
+                           VerticalAlignment="Center"
+                           Foreground="#555"
+                           Text="Different IP? "/>
+                <TextBox x:Name="IpOverride"
+                         Width="160"
+                         VerticalContentAlignment="Center"
+                         TextChanged="IpOverride_TextChanged"/>
+            </StackPanel>
+            <TextBlock Style="{StaticResource Body}" Margin="16,0,0,8">
                 <Run FontWeight="SemiBold">2.</Run>
-                Go to <Run FontWeight="SemiBold">UniFi OS → System → Advanced</Run>.
-                <LineBreak/>
+                Sign in as an administrator and toggle
+                <Run FontWeight="SemiBold">SSH</Run> on.<LineBreak/>
                 <Run FontWeight="SemiBold">3.</Run>
-                Enable the <Run FontWeight="SemiBold">SSH</Run> toggle.<LineBreak/>
-                <Run FontWeight="SemiBold">4.</Run>
                 Set (or reset) the <Run FontWeight="SemiBold">root</Run> password
                 when prompted. Remember it — you'll need it on the next screen.
             </TextBlock>

@@ -12,6 +12,11 @@ public sealed class ConnectResult {
     public bool Ok { get; init; }
     public string Fingerprint { get; init; } = "";
     public string Error { get; init; } = "";
+    // True when the failure was a credential rejection (wrong password,
+    // bad key, etc).  Distinguishes auth failures from network /
+    // host-key / unreachable errors so the UI can apply an
+    // auth-specific cooldown matching the server's faillock policy.
+    public bool IsAuthFailure { get; init; }
 }
 
 public sealed class RunResult {
@@ -43,6 +48,12 @@ public sealed class SshService {
                         ? "" : $"unexpected response: {output.Trim()}",
                 };
             }
+        } catch (Renci.SshNet.Common.SshAuthenticationException ex) {
+            return new ConnectResult {
+                Ok = false,
+                Error = ex.Message,
+                IsAuthFailure = true,
+            };
         } catch (Exception ex) {
             return new ConnectResult { Ok = false, Error = ex.Message };
         }
@@ -119,10 +130,26 @@ public sealed class SshService {
     private static (SshClient, FingerprintHolder) CreateClient(Connection c) {
         ConnectionInfo info;
         if (c.AuthMethod == AuthMethod.Password) {
+            // UDM / UniFi OS sshd is typically configured with
+            // PasswordAuthentication=no + KbdInteractiveAuthentication=yes,
+            // which rejects SSH.NET's PasswordAuthenticationMethod (it only
+            // implements the legacy "password" SSH method).  Register both
+            // here so the client succeeds against either policy: the server
+            // advertises one or the other, and SSH.NET tries the matching
+            // one.
+            var password = c.Password ?? "";
+            var passwordAuth = new PasswordAuthenticationMethod(
+                c.Username, password);
+            var keyboardAuth = new KeyboardInteractiveAuthenticationMethod(
+                c.Username);
+            keyboardAuth.AuthenticationPrompt += (_, e) => {
+                foreach (var prompt in e.Prompts) {
+                    prompt.Response = password;
+                }
+            };
             info = new ConnectionInfo(
                 c.Host, c.Port, c.Username,
-                new PasswordAuthenticationMethod(
-                    c.Username, c.Password ?? ""));
+                passwordAuth, keyboardAuth);
         } else {
             var keyFile = string.IsNullOrEmpty(c.PrivateKeyPassphrase)
                 ? new PrivateKeyFile(c.PrivateKeyPath ?? "")

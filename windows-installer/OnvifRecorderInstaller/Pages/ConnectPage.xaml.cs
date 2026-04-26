@@ -1,6 +1,7 @@
 using System;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using OnvifRecorderInstaller.Services;
 
@@ -22,14 +23,75 @@ public partial class ConnectPage : Page {
         }
     }
 
+    // Set during PasswordChanged / TextChanged → ApplyFormToConnection so
+    // we don't keep two parallel state bags in sync via a getter chain.
+    // _syncing prevents the two TextChanged/PasswordChanged handlers from
+    // re-firing each other when the Show toggle copies between them.
+    private bool _syncing;
+
+    // Mirrors the router's pam_faillock policy
+    // (deny=3, unlock_time=180): after 3 consecutive auth failures, lock
+    // the Test button locally so the user doesn't trip the server-side
+    // lockout (which would shift the failure mode to the misleading
+    // "No supported authentication methods available").  181s instead
+    // of exactly 180 to give the server a one-second margin.
+    private const int kAuthFailureLimit = 3;
+    private const int kAuthCooldownSeconds = 181;
+    private int _authFailures;
+    private DispatcherTimer? _cooldownTimer;
+    private DateTime _cooldownExpires;
+
     private void AuthCombo_Changed(object sender, SelectionChangedEventArgs e) {
         if (!IsLoaded) return;
         bool password = AuthCombo.SelectedIndex == 0;
         SecretLabel.Text = password ? "Password:" : "Key file:";
-        PasswordBox.Visibility = password ? Visibility.Visible : Visibility.Collapsed;
+        // Show whichever password control matches the current toggle state.
+        bool showPlain = ShowPassword.IsChecked == true;
+        PasswordBox.Visibility = password && !showPlain
+            ? Visibility.Visible : Visibility.Collapsed;
+        PasswordPlainBox.Visibility = password && showPlain
+            ? Visibility.Visible : Visibility.Collapsed;
+        ShowPassword.Visibility = password
+            ? Visibility.Visible : Visibility.Collapsed;
         KeyFileRow.Visibility = password ? Visibility.Collapsed : Visibility.Visible;
         PassphraseLabel.Visibility = password ? Visibility.Collapsed : Visibility.Visible;
         PassphraseBox.Visibility = password ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void ShowPassword_Toggled(object sender, RoutedEventArgs e) {
+        if (!IsLoaded) return;
+        bool showPlain = ShowPassword.IsChecked == true;
+        if (showPlain) {
+            // Reveal: copy whatever was masked into the plain text box.
+            _syncing = true;
+            PasswordPlainBox.Text = PasswordBox.Password;
+            _syncing = false;
+            PasswordBox.Visibility = Visibility.Collapsed;
+            PasswordPlainBox.Visibility = Visibility.Visible;
+            PasswordPlainBox.Focus();
+        } else {
+            // Hide: copy back into the secure box.
+            _syncing = true;
+            PasswordBox.Password = PasswordPlainBox.Text;
+            _syncing = false;
+            PasswordPlainBox.Visibility = Visibility.Collapsed;
+            PasswordBox.Visibility = Visibility.Visible;
+            PasswordBox.Focus();
+        }
+    }
+
+    private void PasswordBox_PasswordChanged(object sender, RoutedEventArgs e) {
+        if (_syncing || !IsLoaded) return;
+        _syncing = true;
+        PasswordPlainBox.Text = PasswordBox.Password;
+        _syncing = false;
+    }
+
+    private void PasswordPlainBox_TextChanged(object sender, TextChangedEventArgs e) {
+        if (_syncing || !IsLoaded) return;
+        _syncing = true;
+        PasswordBox.Password = PasswordPlainBox.Text;
+        _syncing = false;
     }
 
     private void Browse_Click(object sender, RoutedEventArgs e) {
@@ -62,10 +124,47 @@ public partial class ConnectPage : Page {
                 $"Host key fingerprint:\n{result.Fingerprint}\n" +
                 "This fingerprint will be pinned on subsequent connections.";
             NextButton.IsEnabled = true;
+            _authFailures = 0;  // success clears the local fail counter
         } else {
             StatusText.Foreground = System.Windows.Media.Brushes.DarkRed;
             StatusText.Text = "Failed: " + result.Error;
+            if (result.IsAuthFailure) {
+                _authFailures++;
+                if (_authFailures >= kAuthFailureLimit) {
+                    StartLockoutCooldown();
+                }
+            }
         }
+    }
+
+    private void StartLockoutCooldown() {
+        _cooldownExpires = DateTime.UtcNow.AddSeconds(kAuthCooldownSeconds);
+        TestButton.IsEnabled = false;
+        LockoutWarning.Visibility = Visibility.Visible;
+        _cooldownTimer?.Stop();
+        _cooldownTimer = new DispatcherTimer {
+            Interval = TimeSpan.FromSeconds(1),
+        };
+        _cooldownTimer.Tick += (_, _) => UpdateCooldown();
+        _cooldownTimer.Start();
+        UpdateCooldown();
+    }
+
+    private void UpdateCooldown() {
+        var remaining = (int)Math.Ceiling(
+            (_cooldownExpires - DateTime.UtcNow).TotalSeconds);
+        if (remaining <= 0) {
+            _cooldownTimer?.Stop();
+            _cooldownTimer = null;
+            _authFailures = 0;
+            LockoutWarning.Visibility = Visibility.Collapsed;
+            TestButton.IsEnabled = true;
+            return;
+        }
+        LockoutWarning.Text =
+            $"3 wrong-password attempts; the router locks the root account " +
+            $"for 180 s after this point.  Test disabled for {remaining} s " +
+            $"to let the lockout clear.";
     }
 
     private bool ApplyFormToConnection(out string error) {

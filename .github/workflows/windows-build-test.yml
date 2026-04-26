@@ -1,0 +1,50 @@
+name: Build Windows installer (test)
+
+# Manual-only.  Builds OnvifRecorderInstaller.exe from any branch/sha
+# on a real windows-2022 runner and uploads it as a workflow artifact —
+# no GitHub release, no apt repo touched.  Use this to validate
+# Windows-installer changes without cutting a tag.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag, or commit SHA to build'
+        required: true
+        default: 'main'
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore windows-installer/OnvifRecorderInstaller.sln
+
+      - name: Publish self-contained single-file exe
+        run: >
+          dotnet publish windows-installer/OnvifRecorderInstaller/OnvifRecorderInstaller.csproj
+          -c Release
+          -r win-x64
+          --self-contained
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:PublishTrimmed=false
+          -o publish-out
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnvifRecorderInstaller-test
+          path: publish-out/OnvifRecorderInstaller.exe
+          if-no-files-found: error
+          retention-days: 14
