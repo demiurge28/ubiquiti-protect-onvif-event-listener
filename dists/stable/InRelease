@@ -6,35 +6,35 @@ Label: onvif-recorder
 Suite: stable
 Codename: stable
 Version: 1.0
-Date: Sun, 26 Apr 2026 17:20:03 UTC
+Date: Sun, 26 Apr 2026 18:12:55 UTC
 Architectures: arm64
 Components: main
 Description: onvif-recorder stable channel
 MD5Sum:
- 30ce6a6638548b17a3de65a0887787d2 984 main/binary-arm64/Packages
- 1fe4a335e8eb0afb0ff0eef667f74057 620 main/binary-arm64/Packages.gz
+ 7b53f6bb8c4cf5a6efcf3627df676ee6 984 main/binary-arm64/Packages
+ a91a306cbce1cde84e29ea6a3e76a0f1 622 main/binary-arm64/Packages.gz
  5b0d463a62135a82f3c045bd284dabda 153 main/binary-arm64/Release
 SHA1:
- cc05c4e54b08566706f55f4d78463a49927248c5 984 main/binary-arm64/Packages
- d682c2e20376f3b78e5983fd177b5aa53a3f6398 620 main/binary-arm64/Packages.gz
+ 3daf4d8a4525b1d2a71baf61e0bf552b47ebf8a8 984 main/binary-arm64/Packages
+ 6e66f12329f073449fff1a64926a26c0dcbf3d66 622 main/binary-arm64/Packages.gz
  602e4d1942e7372479e6bc986b3c24ce07bd25a5 153 main/binary-arm64/Release
 SHA256:
- 64f7335d56603588ad81b9cf8861d6b33fab9649ce0d376e4ab35cce79fca4ac 984 main/binary-arm64/Packages
- 50f5a526966a7f7e147548e2c08445e57baba793d3db31b1f1adbfad5088ca83 620 main/binary-arm64/Packages.gz
+ 5a42916653dad821024af4a6e2f4c6da2d17d3ec9e7e24f5087fe5d42e376cdc 984 main/binary-arm64/Packages
+ 0285b9726dc4267bc0079b5b9c3b5e6518116541908e1a6b49ef99fbd36589be 622 main/binary-arm64/Packages.gz
  b44ba30daf8e3d33127ee15a9ce8185a34461185153db4211fd70824bee58d19 153 main/binary-arm64/Release
 -----BEGIN PGP SIGNATURE-----
 
-iQIzBAEBCgAdFiEEppQhR+JB3iqGS85rXQujy8Eq0qIFAmnuSUMACgkQXQujy8Eq
-0qLJcQ//bF4nF2YYuG4bSFG2q0ccUEIBio7XEcp61Ncah1vtWVSin6csbzPItd7E
-SsE0rviWcivT4w1JXuoa/xr00Bl3tq0jh8BQ74MLSiQ0NMDiYqzhrqqenXwAL+ul
-+iG+v2/8WO3EQBSys35vW3Ac7P4lqGDHiH4OJ6CRXrWbDiWfSd9xFDgZRo5Zoy00
-ymWMAeoRxn7ieLHGS//fb4/kAc9Vnf6qMsQ8qkoSBcDDdckoJi9joyeLMK8lxx9t
-2e67QD9OI7gmkLghBrt+N0A/C1yHCYXGDRtYwNK4ldebzswtb4Yk1SLAYZaOMt4V
-RaR6ONDLkN23p/GoR0hAKQTuXiRYinKfUe+qVUI1DV28bxWrHscILd901gVQp/qw
-YDcj9iaYHqnQBfCRTG16xLSzsxdw+wiHDeJt9RCIoVE9Mbhm8v35ntnaQgccBv2K
-aLsy/rV5KfdfoqBN2EWWzuVqDVdTXjtSz3BJ++207IZBRGixo1H41NNLhLHBOIzs
-udu8bSEsZyBWdmhzq2E+UgmGG+FD7InzN4sdlrVhlJNWHIDcAoXON0s8Nnt+rfc4
-xjoVlhuedLDFjW5aO83nql1WSpwrnGlfZw4tlaImXE+2y7YoESzzx/BQr9c+bKxW
-ZK+iFRLWGECLdaSdDyRKgk3EQZTG5yiNew/d1IukuSQdhqlu0s0=
-=m4dw
+iQIzBAEBCgAdFiEEppQhR+JB3iqGS85rXQujy8Eq0qIFAmnuVacACgkQXQujy8Eq
+0qIAshAAl9ZbzDJI31ZpGI8jS7GktF7WM87yPzeCpF32l1RYpLXITIWsJMl+KOnp
+FS9dz6cjDmyorH2Op8tm78ZyVDYKwuVRHXYmrfabvQ2V/nFjCR/ZWOvLRJ8zC1eT
+RpsZPw9AbOo9hpUJOujOr9wQTEhDzTl0f/2p8DNzVU6e38LEE8M17Kaalrwy8Xrm
+XlsQThZzaepzB6gsuOcglu0788AVV2plU27+6Dd1QwOauWW3C4ZMK3zVleH/AvJi
+T6g2zLzxtO//qqpaoZd/NTKpPvA9xASS8kKj5o/n2aJrmG7joJGlKqUuF3jIR4K9
+7uqMaCEma32BT2ztor2BOmjkWjHCInW9wnnHOQh0VvGFevhST1lUDEJTriilLm9D
+c2Gf55xYJElN0g3cAqqtJQd00+o8b4LWtncwuRPRPjAaxV5ftUjy0KQ+S29BxixL
+aWwmNkw3gJO5kdzwm0QywSoBtBkbPGRGdySbw1OAN1mZTGpc7vYlzlNlD/3MDIXQ
+6YLYHdBFpkGowvzu9TYEMyoTJ04EbgEzogE+VU/Qjws25R4uJBnrSyzu2LEN0Duz
+l+5gwXL06zIIIwHWD64HaAJVQz5RgEQ7JKdHTA80u91WTXUzg82x1vQAO2rLWcY4
+9O0nhT2Ud9MiziukikAEiC3aH12bPwj7fvLcqfMITKNIoQkHxPE=
+=P+oN
 -----END PGP SIGNATURE-----
