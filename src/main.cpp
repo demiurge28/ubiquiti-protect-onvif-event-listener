@@ -49,6 +49,7 @@
 #include "absl/log/log_sink_registry.h"
 #include "alarm_notifier.hpp"
 #include "contention_profiler.hpp"
+#include "cpu_profiler.hpp"
 #include "msr_backfill.hpp"
 #include "msr_client.hpp"
 #include "camera_change_log.hpp"
@@ -91,6 +92,11 @@ ABSL_FLAG(int32_t, post_buffer_sec, 2,
 ABSL_FLAG(bool, verbose, false,
     "Enable verbose logging (INFO level): subscription lifecycle, "
     "events received, and renewals. Default logs errors only.");
+ABSL_FLAG(int32_t, cpu_profile_hz, 0,
+    "Frequency (Hz) at which the CPU profiler samples the call "
+    "stacks of all threads via SIGRTMIN+1.  0 disables sampling. "
+    "10-100 is typical; output is exposed at /api/cpuz under the "
+    "auth-gated admin API.");
 ABSL_FLAG(std::string, model_dir, "/usr/share/onvif-recorder/models",
     "Directory containing nanodet_m.param and nanodet_m.bin. "
     "Models are shipped in the Debian package at this path; if missing, "
@@ -332,6 +338,12 @@ int main(int argc, char* argv[]) {
   // UI.  Empty / missing keys leave the underlying flag untouched.
   const std::string kConfigPath = "/etc/onvif-recorder/config.json";
   runtime_config::LoadFromFile(kConfigPath);
+
+  // Optional periodic CPU sampler.  hz = 0 (default) leaves the
+  // sampler dormant; runtime_config can flip it on (the admin
+  // Configuration card writes to kConfigPath above).  Must run
+  // after LoadFromFile so the flag override is in effect.
+  onvif::CpuProfiler::instance().start(absl::GetFlag(FLAGS_cpu_profile_hz));
 
   const bool verbose = absl::GetFlag(FLAGS_verbose);
   if (verbose) {

@@ -92,6 +92,13 @@ const std::vector<Entry>& Schema() {
      "Verbose log level (INFO and above).  Disabled by default writes only "
      "errors.",
      "Logging"},
+
+    // ---- Profiling ----
+    {"cpu_profile_hz", Type::Int,
+     "Frequency (Hz) at which the CPU profiler samples thread call "
+     "stacks.  0 disables sampling (default).  10–100 is a useful "
+     "range; output appears at /api/cpuz under the admin URL.",
+     "Profiling"},
   };
   return kEntries;
 }

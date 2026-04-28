@@ -81,6 +81,18 @@ cc_library(
 )
 
 cc_library(
+    name = "cpu_profiler",
+    srcs = ["src/cpu_profiler.cpp"],
+    hdrs = ["src/cpu_profiler.hpp"],
+    strip_include_prefix = "src",
+    linkopts = ["-lrt"],  # timer_create / timer_settime / timer_delete
+    deps = [
+        "@com_google_absl//absl/log:log",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "log_ring",
     srcs = ["src/log_ring.cpp"],
     hdrs = ["src/log_ring.hpp"],
@@ -113,6 +125,7 @@ cc_library(
     strip_include_prefix = "src",
     deps = _MHD + _CURL + _TCMALLOC + [
         ":contention_profiler",
+        ":cpu_profiler",
         ":dump_sanitizer",
         ":onvif_listener",
         ":runtime_config",
@@ -346,6 +359,7 @@ cc_binary(
         ":alarm_notifier",
         ":camera_change_log",
         ":contention_profiler",
+        ":cpu_profiler",
         ":detection_recorder",
         ":event_recorder",
         ":log_ring",

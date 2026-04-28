@@ -44,6 +44,7 @@ typedef int MHD_Result;
 #include "absl/status/status.h"
 
 #include "contention_profiler.hpp"
+#include "cpu_profiler.hpp"
 #include "dump_sanitizer.hpp"
 #include "onvif_listener.hpp"
 #include "runtime_config.hpp"
@@ -1279,6 +1280,12 @@ MHD_Result handler(
     // Per-mutex contention stats from the always-on absl::Mutex
     // tracer.  Format: fixed-width text table.
     body = ContentionProfiler::instance().snapshot();
+    content_type = "text/plain; charset=utf-8";
+  } else if (is_get &&
+             std::strcmp(url, "/api/cpuz") == 0) {
+    // Periodic CPU sample dump.  Empty when --cpu_profile_hz=0
+    // (the default).  Flip on via the admin Configuration card.
+    body = CpuProfiler::instance().snapshot();
     content_type = "text/plain; charset=utf-8";
   } else if (is_post) {
     auto* pc = static_cast<PostCtx*>(*con_cls);
