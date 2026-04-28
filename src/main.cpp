@@ -770,6 +770,8 @@ int main(int argc, char* argv[]) {
         motion_poller->set_coalesce_window(
             static_cast<uint32_t>(absl::GetFlag(FLAGS_coalesce_window_sec)));
         motion_poller->set_use_msr_thumbnail_ids(use_msr_thumb_ids);
+        motion_poller->set_protect_api(
+            absl::GetFlag(FLAGS_protect_url), protect_user_id);
       } else {
         LOG(ERROR) << "[motion_poller] " << mp_or.status().message();
       }

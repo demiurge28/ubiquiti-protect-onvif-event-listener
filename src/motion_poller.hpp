@@ -90,6 +90,13 @@ class MotionPoller {
   /// matching native Protect.  Must be called before start().
   void set_use_msr_thumbnail_ids(bool use_msr);
 
+  /// Local Protect API base URL (e.g. "http://localhost:7080").  Used to
+  /// fetch MSR-format thumbnails (length != 24) that are stored as
+  /// native UBV files served by the msp media server, rather than
+  /// rows in the thumbnails Postgres table.  Empty disables the
+  /// fallback (DB-only lookup).
+  void set_protect_api(const std::string& url, const std::string& user_id);
+
   /// Launch the background poll thread.  Non-blocking.
   void start();
 

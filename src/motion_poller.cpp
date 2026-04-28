@@ -14,6 +14,7 @@
 
 #include "motion_poller.hpp"
 
+#include <curl/curl.h>
 #include <libpq-fe.h>
 
 #include <algorithm>
@@ -94,6 +95,48 @@ std::string build_sdr_payload(uint64_t ts_ms, const std::string& obj_type,
 
 }  // namespace motion_poller_internal
 
+namespace {
+
+// GET <protect_url>/api/thumbnails/<id> with X-UserId auth.  Returns
+// the JPEG bytes on 200, or an empty vector on any error / non-200.
+// Mirrors admin_server's fetch_protect_thumbnail.  Used to pull
+// MSR-format (non-24-char) thumbnails that Protect stores as native
+// UBV files served by the msp media server, since those never land
+// in the Postgres `thumbnails` table.
+std::vector<uint8_t> fetch_thumbnail_via_protect(
+    const std::string& base_url,
+    const std::string& user_id,
+    const std::string& thumb_id) {
+  if (base_url.empty() || user_id.empty()) return {};
+  const std::string url = base_url + "/api/thumbnails/" + thumb_id;
+  std::string buf;
+  CURL* curl = curl_easy_init();
+  if (!curl) return {};
+  struct curl_slist* hdrs = nullptr;
+  const std::string user_hdr = "X-UserId: " + user_id;
+  hdrs = curl_slist_append(hdrs, user_hdr.c_str());
+  hdrs = curl_slist_append(hdrs, "X-Source: unifi-os");
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);  // NOLINT(runtime/int)
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);  // NOLINT(runtime/int)
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
+      +[](char* p, size_t s, size_t n, void* ud) -> size_t {
+        static_cast<std::string*>(ud)->append(p, s * n);
+        return s * n;
+      });
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+  const CURLcode rc = curl_easy_perform(curl);
+  long code = 0;  // NOLINT(runtime/int)
+  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
+  curl_slist_free_all(hdrs);
+  curl_easy_cleanup(curl);
+  if (rc != CURLE_OK || code != 200) return {};
+  return std::vector<uint8_t>(buf.begin(), buf.end());
+}
+
+}  // namespace
+
 // ---------------------------------------------------------------------------
 // Implementation struct
 // ---------------------------------------------------------------------------
@@ -105,6 +148,8 @@ struct MotionPoller::Impl {
   const object_detect::ObjectDetector* detector{nullptr};
   AlarmNotifier* alarm_notifier{nullptr};
   std::string ubv_dir;
+  std::string protect_url;       // empty = HTTP-fallback disabled
+  std::string protect_user_id;
   int poll_interval_sec{10};
   uint32_t coalesce_window_sec{30};
   bool use_msr_thumb_ids{false};
@@ -182,6 +227,12 @@ void MotionPoller::set_coalesce_window(uint32_t sec) {
 
 void MotionPoller::set_use_msr_thumbnail_ids(bool use_msr) {
   impl_->use_msr_thumb_ids = use_msr;
+}
+
+void MotionPoller::set_protect_api(const std::string& url,
+                                   const std::string& user_id) {
+  impl_->protect_url = url;
+  impl_->protect_user_id = user_id;
 }
 
 void MotionPoller::start() {
@@ -396,36 +447,46 @@ void MotionPoller::poll_loop() {
                   << " camera=" << cam_id << " thumb=" << thumb_id
                   << " start=" << start_ms << " end=" << end_ms;
 
-        // Fetch the thumbnail JPEG from the thumbnails table.
-        impl_->maybe_reconnect();
-        const char* tp[] = { thumb_id.c_str() };
-        PGresult* thumb_res = PQexecParams(impl_->conn,
-          "SELECT content FROM thumbnails WHERE id = $1",
-          1, nullptr, tp, nullptr, nullptr, 1);
+        // Fetch the thumbnail JPEG.  Protect routes thumbnailIds by
+        // length: 24-char IDs live in the `thumbnails` Postgres table;
+        // any other length (typically the MSR "{MAC}-{ts}" 26-char
+        // form Protect uses for native first-party cameras post 7.x)
+        // is stored as a UBV file served by the msp media server.
+        // Try the DB first for 24-char IDs; for the rest, hit the
+        // local Protect API which routes to msp transparently.
+        std::vector<uint8_t> jpeg;
+        if (thumb_id.size() == 24) {
+          impl_->maybe_reconnect();
+          const char* tp[] = { thumb_id.c_str() };
+          PGresult* thumb_res = PQexecParams(impl_->conn,
+            "SELECT content FROM thumbnails WHERE id = $1",
+            1, nullptr, tp, nullptr, nullptr, 1);
 
-        if (PQresultStatus(thumb_res) != PGRES_TUPLES_OK ||
-            PQntuples(thumb_res) == 0 ||
-            PQgetisnull(thumb_res, 0, 0)) {
-          LOG(INFO) << "[motion_poller] skip event " << ev_id
-                    << ": thumbnail " << thumb_id << " not found in DB"
-                    << " (query status="
-                    << PQresStatus(PQresultStatus(thumb_res)) << ")";
+          if (PQresultStatus(thumb_res) == PGRES_TUPLES_OK &&
+              PQntuples(thumb_res) > 0 &&
+              !PQgetisnull(thumb_res, 0, 0)) {
+            const char* raw = PQgetvalue(thumb_res, 0, 0);
+            const int raw_len = PQgetlength(thumb_res, 0, 0);
+            jpeg.assign(raw, raw + raw_len);
+          }
           PQclear(thumb_res);
-          ++hb_skipped_no_thumb;
-          // Update hwm even on skip so we don't retry endlessly.
-          impl_->hwm[cam_id] = start_ms;
-          continue;
+        } else if (!impl_->protect_url.empty() &&
+                   !impl_->protect_user_id.empty()) {
+          // Non-24-char ID: msp-served UBV thumbnail.  Fetch via
+          // Protect's local /api/thumbnails/<id> which dispatches to
+          // msp and returns the JPEG bytes back to us.
+          jpeg = fetch_thumbnail_via_protect(
+              impl_->protect_url, impl_->protect_user_id, thumb_id);
         }
-
-        const char* raw = PQgetvalue(thumb_res, 0, 0);
-        const int raw_len = PQgetlength(thumb_res, 0, 0);
-        std::vector<uint8_t> jpeg(raw, raw + raw_len);
-        PQclear(thumb_res);
 
         if (jpeg.empty()) {
           LOG(INFO) << "[motion_poller] skip event " << ev_id
                     << ": thumbnail " << thumb_id
-                    << " exists but has zero bytes";
+                    << (thumb_id.size() == 24
+                            ? " not in DB"
+                            : " not reachable via Protect API");
+          ++hb_skipped_no_thumb;
+          // Update hwm even on skip so we don't retry endlessly.
           impl_->hwm[cam_id] = start_ms;
           continue;
         }

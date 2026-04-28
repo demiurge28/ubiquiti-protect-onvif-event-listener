@@ -338,7 +338,7 @@ cc_library(
     srcs = ["src/motion_poller.cpp"],
     hdrs = ["src/motion_poller.hpp"],
     strip_include_prefix = "src",
-    deps = [
+    deps = _CURL + [
         ":alarm_notifier",
         ":jpeg_crop",
         ":object_detect",
