@@ -152,6 +152,7 @@ cc_library(
     deps = _CURL + _XML2 + _SSL + _ZSTD + [
         ":contention_profiler",
         ":jpeg_crop",
+        ":listener_status",
         ":util",
         "@com_google_absl//absl/log:log",
         "@com_google_absl//absl/status:status",
@@ -358,6 +359,17 @@ cc_library(
     strip_include_prefix = "src",
     deps = _PQ + [
         "@com_google_absl//absl/log:log",
+        "@com_google_absl//absl/synchronization:synchronization",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "listener_status",
+    srcs = ["src/listener_status.cpp"],
+    hdrs = ["src/listener_status.hpp"],
+    strip_include_prefix = "src",
+    deps = [
         "@com_google_absl//absl/synchronization:synchronization",
     ],
     visibility = ["//visibility:public"],

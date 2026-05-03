@@ -51,6 +51,7 @@
 #include "contention_profiler.hpp"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "listener_status.hpp"
 #include "util.hpp"
 
 namespace onvif {
@@ -732,6 +733,10 @@ class CameraWorker {
       // accounts produce the identical fault -- only Administrator works.
       // Confirmed against a Hikvision DS-2CD2387G2P-LSU/SL in issue #20.
       if (resp.body.find("NotAuthorized") != std::string::npos) {
+        // Surface this in the admin Camera Health card so the user
+        // doesn't have to dig through the journal to find the hint
+        // below.  Cleared on first successful subscription event.
+        mark_camera_needs_onvif_admin(cfg_.ip);
         LOG_FIRST_N(ERROR, 1)
             << '[' << cfg_.ip << "] PullPoint subscription rejected with "
             << "ter:NotAuthorized.\n"
@@ -770,6 +775,10 @@ class CameraWorker {
       "/*[local-name()='ReferenceParameters']");
     if (!sub.ref_params.empty())
       LOG(INFO) << '[' << cfg_.ip << "] subscription has ReferenceParameters";
+    // Successful subscription -- whatever auth we used here works.
+    // Clear any stale "needs ONVIF Administrator" badge so a camera
+    // that was once flagged but is now healthy stops nagging the user.
+    clear_camera_needs_onvif_admin(cfg_.ip);
     return sub;
   }
 

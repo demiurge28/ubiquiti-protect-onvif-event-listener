@@ -46,6 +46,7 @@ typedef int MHD_Result;
 #include "contention_profiler.hpp"
 #include "cpu_profiler.hpp"
 #include "dump_sanitizer.hpp"
+#include "listener_status.hpp"
 #include "onvif_listener.hpp"
 #include "protect_user_id_provider.hpp"
 #include "runtime_config.hpp"
@@ -428,14 +429,25 @@ async function loadCameraHealth(){
     const now = j.now_ms || Date.now();
     body.innerHTML = j.cameras.map(c => {
       const age = c.last_event_ms ? (now - c.last_event_ms) : null;
+      const hintRow = c.hint === 'needs_onvif_admin'
+        ? `<tr><td colspan="6" style="padding:4px 6px 8px 22px;color:#f0c674;font-size:11px;border-top:0">
+             &#9888; ONVIF event subscription rejected with <code>ter:NotAuthorized</code>.
+             Most Hikvision firmware (and OEM rebadges) require a separate ONVIF user with
+             <b>Administrator</b> privileges -- web-UI admin alone is not enough.
+             See <a href="https://github.com/danielwoz/ubiquiti-protect-onvif-event-listener/issues/20"
+                   target="_blank" rel="noopener" style="color:#f0c674">issue #20</a> for the fix.
+           </td></tr>`
+        : '';
       return `<tr>
         <td style="padding:4px 6px">${c.name || '(unnamed)'}</td>
         <td style="padding:4px 6px;color:#9aa0a6">${c.host || '-'}</td>
         <td style="padding:4px 6px">${c.is_third_party ? 'third-party' : 'first-party'}</td>
         <td style="padding:4px 6px">${fmtAge(age)}</td>
         <td style="padding:4px 6px">${c.events_1h}</td>
-        <td style="padding:4px 6px">${pillFor(age)}</td>
-      </tr>`;
+        <td style="padding:4px 6px">${c.hint === 'needs_onvif_admin'
+            ? '<span class="pill red">auth</span>'
+            : pillFor(age)}</td>
+      </tr>${hintRow}`;
     }).join('');
   } catch (e) {
     document.getElementById('camhealth-body').innerHTML =
@@ -946,6 +958,9 @@ std::string build_camera_health_json(const Ctx& ctx) {
     j += std::to_string(r.last_event_ms);
     j += ",\"events_1h\":";
     j += std::to_string(r.events_1h);
+    if (camera_needs_onvif_admin(r.host)) {
+      j += ",\"hint\":\"needs_onvif_admin\"";
+    }
     j += "}";
   }
   j += "]}";

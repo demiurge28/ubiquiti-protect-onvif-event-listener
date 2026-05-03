@@ -306,6 +306,14 @@ cc_test(
 )
 
 cc_test(
+    name = "test_listener_status",
+    srcs = ["test_listener_status.cpp"],
+    deps = [
+        "//:listener_status",
+    ],
+)
+
+cc_test(
     name = "test_admin_server",
     srcs = ["test_admin_server.cpp"],
     deps = [
