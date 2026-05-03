@@ -334,6 +334,17 @@ cc_library(
 )
 
 cc_library(
+    name = "patch_watcher",
+    srcs = ["src/patch_watcher.cpp"],
+    hdrs = ["src/patch_watcher.hpp"],
+    strip_include_prefix = "src",
+    deps = [
+        "@com_google_absl//absl/log:log",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "motion_poller",
     srcs = ["src/motion_poller.cpp"],
     hdrs = ["src/motion_poller.hpp"],
@@ -369,6 +380,7 @@ cc_binary(
         ":msr_client",
         ":object_detect",
         ":onvif_listener",
+        ":patch_watcher",
         ":protect_ui_patch",
         ":runtime_config",
         ":unifi_camera_config",

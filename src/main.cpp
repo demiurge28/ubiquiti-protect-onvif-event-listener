@@ -68,6 +68,7 @@
 #include "motion_poller.hpp"
 #include "object_detect.hpp"
 #include "onvif_listener.hpp"
+#include "patch_watcher.hpp"
 #include "protect_ui_patch.hpp"
 #include "runtime_config.hpp"
 #include "unifi_camera_config.hpp"
@@ -502,6 +503,37 @@ int main(int argc, char* argv[]) {
       LOG(WARNING) << "[admin_server] nginx patch: " << ng_a.message();
   } else {
     LOG(WARNING) << "[admin_server] failed to start on port " << admin_port;
+  }
+
+  // Self-heal across UniFi OS firmware-overlay updates that bypass apt.
+  // (apt-driven Protect upgrades fire our dpkg trigger, which restarts
+  // the service and re-runs the startup patch pass; the inotify watcher
+  // covers the non-dpkg case.)  Re-runs are idempotent: each patch
+  // detects "already patched" and no-ops.
+  std::unique_ptr<protect_ui::PatchWatcher> patch_watcher;
+  if (absl::GetFlag(FLAGS_patch_alarm_picker)) {
+    std::vector<protect_ui::WatchSpec> specs = {
+      {"/usr/share/unifi-protect/app/node_modules/@ubnt/"
+           "unifi-protect-ui-internal/dist",
+       {"swai", "vantage"}},
+      {"/usr/share/unifi-protect/app", {"service"}},
+      {"/data/unifi-core/config/http", {"site-local-ip"}},
+    };
+    patch_watcher = std::make_unique<protect_ui::PatchWatcher>(
+        std::move(specs),
+        [log_port, admin_port]() {
+          auto sp = protect_ui::patch_alarm_picker();
+          if (!sp.ok())
+            LOG(WARNING) << "[patch_watcher] alarm picker: " << sp.message();
+          auto sl = protect_ui::patch_nginx_log_proxy(log_port);
+          if (!sl.ok())
+            LOG(WARNING) << "[patch_watcher] nginx log: " << sl.message();
+          auto sa = protect_ui::patch_nginx_admin_proxy(admin_port);
+          if (!sa.ok())
+            LOG(WARNING) << "[patch_watcher] nginx admin: " << sa.message();
+        });
+    if (!patch_watcher->start())
+      LOG(WARNING) << "[patch_watcher] failed to start";
   }
 
   // Open the change log if configured.
