@@ -11,6 +11,60 @@ AI** (e.g. G3 Instant). See [First-party camera support](#first-party-camera-sup
 
 ---
 
+## Fork additions
+
+This fork extends the original [danielwoz/ubiquiti-protect-onvif-event-listener](https://github.com/danielwoz/ubiquiti-protect-onvif-event-listener)
+with the following improvements.
+
+### Per-profile ONVIF snapshot selection
+
+Multi-channel cameras — fisheye models, PTZ cameras with e-PTZ channels, and
+multi-sensor units — expose multiple **ONVIF media profiles**, each with its own
+snapshot endpoint. UniFi Protect typically stores the URL for only one profile,
+which is often wrong for these cameras.
+
+This fork adds automatic per-profile snapshot URL discovery:
+
+- On each camera (re)connect, `GetServices` is called to detect the ONVIF
+  Media service, `GetProfiles` auto-discovers the first available profile token,
+  and `GetSnapshotUri(ProfileToken)` retrieves the per-channel snapshot URL.
+- The discovered URL overrides the Protect-stored URL for all subsequent
+  snapshot fetches — without touching the database.
+- A new `--camera_snapshot_profiles` flag (and admin UI **Cameras** card entry)
+  lets you pin a specific profile token per camera, bypassing auto-discovery.
+- Failures at any step fall back silently to the Protect-stored URL.
+
+**Priority order** (highest wins):
+1. `--camera_snapshot_urls` explicit path override
+2. ONVIF-discovered URL from `GetSnapshotUri`
+3. Protect-stored `thirdPartyCameraInfo.snapshotUrl`
+
+See [FLAGS.md § Per-profile snapshot selection](FLAGS.md#per-profile-snapshot-selection)
+for the full reference, vendor token examples, and limitations.
+
+### Build improvements
+
+**ARM64 native test config** (`--config=arm64_native`) — enables the full
+Bazel test suite to run on **Apple Silicon Macs** via `docker + colima`
+without needing an x86-64 build host:
+
+```bash
+./build-in-docker.sh --test   # auto-detects ARM64 and uses arm64_native config
+```
+
+Key changes:
+- `build-in-docker.sh`: architecture-aware Bazelisk download (was hardcoded
+  to `linux-amd64`, breaking on ARM64 Docker containers).
+- New `--config=arm64_native` in `.bazelrc`: uses `//third_party` from-source
+  builds + `openssl_arm64_native`/`libcurl_arm64_native` instead of the
+  x86→ARM64 cross-compile sysroot.
+- `test/Makefile`: missing `camera_emulators.cpp` source added to the
+  detection recorder build.
+
+**All 20 tests pass** on both x86-64 Linux and ARM64 Apple Silicon.
+
+---
+
 ## Installation on Dream Router / Dream Machine
 
 ### Windows installer (no terminal required)
