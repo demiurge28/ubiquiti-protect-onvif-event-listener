@@ -608,7 +608,9 @@ static std::string extract_profile_token(const std::string& body) {
     auto start = body.find(tag);
     if (start == std::string::npos) continue;
     start += tag.size();
-    const std::string close = "<" + tag.substr(1);  // </trt:ProfileToken> or </ProfileToken>
+    // Build the closing tag: "</trt:ProfileToken>" from "<trt:ProfileToken>".
+    // tag.substr(1) drops the leading '<', so we prepend "</" to get "</...>".
+    const std::string close = "</" + tag.substr(1);  // </trt:ProfileToken> or </ProfileToken>
     auto end = body.find(close, start);
     if (end != std::string::npos) return body.substr(start, end - start);
   }
