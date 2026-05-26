@@ -1086,12 +1086,15 @@ std::pair<int, std::string> handle_config(const Ctx& ctx,
 //   - dpkg.txt           dpkg-query -W onvif-recorder, unifi-protect, etc.
 //   - system.txt         uname -a, /sys/firmware/devicetree/base/model, free, df
 // Returns ok status when the tarball exists at out_path.
-absl::Status build_diagnostic_dump(const Ctx& ctx,
-                                   const std::string& out_path) {
+// Returns the path of the created tarball on success.
+absl::StatusOr<std::string> build_diagnostic_dump(const Ctx& ctx) {
   char tmpl[] = "/tmp/onvif-dump.XXXXXX";
   if (mkdtemp(tmpl) == nullptr)
     return absl::InternalError("mkdtemp failed");
   const std::string dir = tmpl;
+  // Derive the output tarball path from the unique temp directory so
+  // concurrent dump requests don't clobber each other's output file.
+  const std::string out_path = dir + ".tar.gz";
 
   // One sanitiser shared across every file in this dump so a given IP /
   // credential maps to the same redacted value across files.
@@ -1183,7 +1186,7 @@ absl::Status build_diagnostic_dump(const Ctx& ctx,
   int rc = run_cmd(cmd, &out);
   if (rc != 0)
     return absl::InternalError("tar/rm failed: " + out);
-  return absl::OkStatus();
+  return out_path;
 }
 
 // Read a binary file fully into a string.
@@ -1311,12 +1314,12 @@ MHD_Result handler(
     }
   } else if (is_get &&
              std::strcmp(url, "/api/diagnostic_dump") == 0) {
-    const std::string tar_path = "/tmp/onvif-dump.tar.gz";
-    auto s = build_diagnostic_dump(*ctx, tar_path);
-    if (!s.ok()) {
+    auto dump_or = build_diagnostic_dump(*ctx);
+    if (!dump_or.ok()) {
       status = 500;
-      body = std::string(s.message());
+      body = std::string(dump_or.status().message());
     } else {
+      const std::string& tar_path = dump_or.value();
       body = read_file_binary(tar_path);
       std::remove(tar_path.c_str());
       content_type = "application/gzip";
