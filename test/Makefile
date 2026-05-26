@@ -20,6 +20,7 @@ SRCS_DR := ../onvif_listener.cpp          \
            ../detection_recorder.cpp      \
            ../ubv_thumbnail.cpp           \
            onvif_camera_emulator.cpp      \
+           camera_emulators.cpp          \
            test_detection_recorder.cpp
 
 TARGET_DR := test_detection_recorder

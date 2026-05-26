@@ -1,4 +1,5 @@
 // Copyright 2026 Daniel W
+// Copyright 2026 Ben
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -592,6 +593,194 @@ std::pair<int, std::string> ReolinkCameraEmulator::handle(
 
   resp.second = rewrite_urls(resp.second);
   return resp;
+}
+
+// ============================================================
+// MediaServiceEmulator
+// ============================================================
+
+// Extract content of <trt:ProfileToken>...</trt:ProfileToken> from a body.
+static std::string extract_profile_token(const std::string& body) {
+  for (const auto& tag : {
+          std::string("<trt:ProfileToken>"),
+          std::string("<ProfileToken>"),
+      }) {
+    auto start = body.find(tag);
+    if (start == std::string::npos) continue;
+    start += tag.size();
+    // Build the closing tag: "</trt:ProfileToken>" from "<trt:ProfileToken>".
+    // tag.substr(1) drops the leading '<', so we prepend "</" to get "</...>".
+    const std::string close = "</" + tag.substr(1);  // </trt:ProfileToken> or </ProfileToken>
+    auto end = body.find(close, start);
+    if (end != std::string::npos) return body.substr(start, end - start);
+  }
+  return "";
+}
+
+MediaServiceEmulator::MediaServiceEmulator()
+  : OnvifCameraEmulator("192.168.100.201") {}
+
+std::vector<std::string> MediaServiceEmulator::snapshot_uri_tokens() const {
+  std::lock_guard<std::mutex> lk(mu_);
+  return snapshot_uri_tokens_;
+}
+
+std::pair<int, std::string> MediaServiceEmulator::handle(
+    const std::string& /*path*/,
+    const std::string& soap_action,
+    const std::string& body) {
+  std::lock_guard<std::mutex> lk(mu_);
+  const auto tail = action_tail(soap_action);
+
+  // ---- GetServices: advertise event + media (ver10) services ----
+  if (tail == "GetServicesRequest") {
+    std::string resp =
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+      "<SOAP-ENV:Envelope"
+      "  xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+      "  xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\""
+      "  xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
+      "<SOAP-ENV:Body>"
+      "<tds:GetServicesResponse>"
+      "<tds:Service>"
+      "<tds:Namespace>http://www.onvif.org/ver10/events/wsdl</tds:Namespace>"
+      "<tds:XAddr>http://" + real_ip_ + "/onvif/event_service</tds:XAddr>"
+      "<tds:Version>"
+      "<tt:Major>2</tt:Major><tt:Minor>60</tt:Minor>"
+      "</tds:Version>"
+      "</tds:Service>"
+      "<tds:Service>"
+      "<tds:Namespace>http://www.onvif.org/ver10/media/wsdl</tds:Namespace>"
+      "<tds:XAddr>http://" + real_ip_ + "/onvif/media_service</tds:XAddr>"
+      "<tds:Version>"
+      "<tt:Major>2</tt:Major><tt:Minor>60</tt:Minor>"
+      "</tds:Version>"
+      "</tds:Service>"
+      "</tds:GetServicesResponse>"
+      "</SOAP-ENV:Body>"
+      "</SOAP-ENV:Envelope>";
+    return {200, rewrite_urls(resp)};
+  }
+
+  // ---- GetProfiles: two profiles ----
+  if (tail == "GetProfiles") {
+    std::string resp =
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+      "<SOAP-ENV:Envelope"
+      "  xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+      "  xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\""
+      "  xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
+      "<SOAP-ENV:Body>"
+      "<trt:GetProfilesResponse>"
+      "<trt:Profiles token=\"MainStream\">"
+      "<tt:Name>Main Stream</tt:Name>"
+      "</trt:Profiles>"
+      "<trt:Profiles token=\"SubStream\">"
+      "<tt:Name>Sub Stream</tt:Name>"
+      "</trt:Profiles>"
+      "</trt:GetProfilesResponse>"
+      "</SOAP-ENV:Body>"
+      "</SOAP-ENV:Envelope>";
+    return {200, resp};
+  }
+
+  // ---- GetSnapshotUri: return URL based on profile token in request ----
+  if (tail == "GetSnapshotUri") {
+    const std::string token = extract_profile_token(body);
+    snapshot_uri_tokens_.push_back(token);
+    const std::string uri =
+        "http://" + real_ip_ + "/onvif/snapshot?profile=" + token;
+    std::string resp =
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+      "<SOAP-ENV:Envelope"
+      "  xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+      "  xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\""
+      "  xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
+      "<SOAP-ENV:Body>"
+      "<trt:GetSnapshotUriResponse>"
+      "<trt:MediaUri>"
+      "<tt:Uri>" + uri + "</tt:Uri>"
+      "<tt:InvalidAfterConnect>PT0S</tt:InvalidAfterConnect>"
+      "<tt:Timeout>PT0S</tt:Timeout>"
+      "</trt:MediaUri>"
+      "</trt:GetSnapshotUriResponse>"
+      "</SOAP-ENV:Body>"
+      "</SOAP-ENV:Envelope>";
+    return {200, rewrite_urls(resp)};
+  }
+
+  // ---- CreatePullPointSubscription ----
+  if (tail == "CreatePullPointSubscriptionRequest") {
+    subscribed_ = true;
+    std::string resp =
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+      "<SOAP-ENV:Envelope"
+      "  xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+      "  xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\""
+      "  xmlns:wsa5=\"http://www.w3.org/2005/08/addressing\""
+      "  xmlns:wsnt=\"http://docs.oasis-open.org/wsn/b-2\">"
+      "<SOAP-ENV:Body>"
+      "<tev:CreatePullPointSubscriptionResponse>"
+      "<tev:SubscriptionReference>"
+      "<wsa5:Address>http://" + real_ip_ + "/onvif/event_service</wsa5:Address>"
+      "</tev:SubscriptionReference>"
+      "<wsnt:CurrentTime>2026-01-01T00:00:00Z</wsnt:CurrentTime>"
+      "<wsnt:TerminationTime>2026-01-01T00:02:00Z</wsnt:TerminationTime>"
+      "</tev:CreatePullPointSubscriptionResponse>"
+      "</SOAP-ENV:Body>"
+      "</SOAP-ENV:Envelope>";
+    return {200, rewrite_urls(resp)};
+  }
+
+  // ---- PullMessages: one CellMotionDetector Changed event ----
+  if (tail == "PullMessagesRequest") {
+    if (!subscribed_) return {400, ""};
+    return {200,
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+      "<SOAP-ENV:Envelope"
+      "  xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+      "  xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\""
+      "  xmlns:wsnt=\"http://docs.oasis-open.org/wsn/b-2\""
+      "  xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
+      "<SOAP-ENV:Body>"
+      "<tev:PullMessagesResponse>"
+      "<tev:CurrentTime>2026-01-01T00:00:00Z</tev:CurrentTime>"
+      "<tev:TerminationTime>2026-01-01T00:02:00Z</tev:TerminationTime>"
+      "<wsnt:NotificationMessage>"
+      "<wsnt:Topic"
+      "  Dialect=\"http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet\">"
+      "tns1:RuleEngine/CellMotionDetector/Motion"
+      "</wsnt:Topic>"
+      "<wsnt:Message>"
+      "<tt:Message UtcTime=\"2026-01-01T00:00:01Z\""
+      "            PropertyOperation=\"Changed\">"
+      "<tt:Data>"
+      "<tt:SimpleItem Name=\"IsMotion\" Value=\"true\"/>"
+      "</tt:Data>"
+      "</tt:Message>"
+      "</wsnt:Message>"
+      "</wsnt:NotificationMessage>"
+      "</tev:PullMessagesResponse>"
+      "</SOAP-ENV:Body>"
+      "</SOAP-ENV:Envelope>"};
+  }
+
+  // ---- Renew ----
+  if (tail == "RenewRequest") {
+    return {200,
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+      "<SOAP-ENV:Envelope"
+      "  xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+      "  xmlns:wsnt=\"http://docs.oasis-open.org/wsn/b-2\">"
+      "<SOAP-ENV:Body>"
+      "<wsnt:RenewResponse>"
+      "<wsnt:TerminationTime>2026-01-01T00:04:00Z</wsnt:TerminationTime>"
+      "</wsnt:RenewResponse>"
+      "</SOAP-ENV:Body>"
+      "</SOAP-ENV:Envelope>"};
+  }
+
+  return {400, ""};
 }
 
 // ============================================================

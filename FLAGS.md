@@ -229,3 +229,93 @@ ExecStart=/usr/bin/onvif-recorder \
 | `--state_dir` | `/var/lib/onvif-recorder` | Directory for persistent runtime state (cached user IDs, etc). |
 | `--channel_file` | `/etc/onvif-recorder/channel` | Path to the apt channel file (`stable` / `rc` / `early-access`). |
 | `--msr_url` | `http://127.0.0.1:7700` | URL of the local MSR gRPC service that stores thumbnails as native UBV.  Empty disables MSR forwarding. |
+| `--camera_snapshot_urls` | _(disabled)_ | Per-camera snapshot path overrides as comma-separated `ip=path` pairs, e.g. `192.168.1.107=/cgi-bin/snapshot.cgi`. Useful when the ONVIF-advertised URL is wrong (common on Dahua). |
+| `--camera_resolutions` | _(1920×1080 per camera)_ | Per-camera pixel resolutions as comma-separated `ip=WxH` pairs, e.g. `192.168.1.108=3840x2160`. Used to position the bounding-box grid overlay in Protect 7.1+. |
+| `--camera_snapshot_profiles` | _(auto-discover)_ | Per-camera ONVIF media profile token for snapshot selection, as comma-separated `ip=token` pairs, e.g. `192.168.1.108=MainStream`. See [Per-profile snapshot selection](#per-profile-snapshot-selection). |
+
+---
+
+## Per-profile snapshot selection
+
+Advanced cameras — fisheye models (e.g. UVC AI 360, Dahua M3037-PVE), PTZ cameras
+with separate e-PTZ channels, and multi-sensor units — can expose multiple **ONVIF
+media profiles**, each mapping to a distinct video stream and snapshot endpoint.
+UniFi Protect typically stores the snapshot URL for only one profile, which may
+not be the one you want.
+
+**How it works:**
+
+At startup (and on every reconnect) the recorder:
+
+1. Calls `GetServices` on the camera's device management endpoint.
+2. If a **Media service** (`http://www.onvif.org/ver10/media/wsdl`) is advertised,
+   the recorder calls `GetProfiles` to enumerate available profile tokens.
+3. `GetSnapshotUri(ProfileToken)` retrieves the snapshot URL for the selected
+   profile.
+4. The discovered URL overrides the Protect-stored URL for all subsequent snapshot
+   fetches from that camera — without touching the database.
+
+**Priority order** for the snapshot URL used on each detection:
+
+1. `--camera_snapshot_urls` explicit path override (highest — admin-configured)
+2. ONVIF-discovered URL from `GetSnapshotUri` (this feature)
+3. Protect-stored `thirdPartyCameraInfo.snapshotUrl` (fallback)
+
+If discovery fails at any step — the camera doesn't advertise a media service,
+`GetProfiles` returns an error, or `GetSnapshotUri` fails — the recorder logs the
+reason and silently falls back to the Protect-stored URL. No manual intervention
+is required.
+
+**Auto-discovery (default, no flag needed):**
+
+Leave `--camera_snapshot_profiles` empty. The recorder calls `GetProfiles` on
+every camera that advertises a media service and uses the **first returned
+profile token** automatically.
+
+**Pinning a specific profile:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--camera_snapshot_profiles` | _(auto-discover first profile)_ | Comma-separated `ip=token` pairs. When set, `GetProfiles` is skipped and `GetSnapshotUri` is called directly with the given token. |
+
+```bash
+# Via admin UI (recommended):
+# Admin UI → Cameras → camera_snapshot_profiles
+#   → 192.168.1.108=MainStream,192.168.1.109=SubStream → Save & restart
+
+# Via /etc/default/onvif-recorder.local:
+echo 'ONVIF_RECORDER_FLAGS="--camera_snapshot_profiles=192.168.1.108=MainStream"' \
+    > /etc/default/onvif-recorder.local
+systemctl restart onvif-recorder
+```
+
+**Discovering available profile tokens:**
+
+The raw SOAP log captures `GetProfiles` and `GetSnapshotUri` responses. Run the
+recorder with `--raw_log`, let it connect, then inspect the log:
+
+```bash
+/usr/bin/onvif-recorder --verbose --raw_log=/tmp/onvif-raw.jsonl
+# In a second terminal — find the GetProfiles exchange:
+grep -l GetProfiles /tmp/onvif-raw.jsonl | head -5
+# Or from the admin UI: Diagnostic dump → search for "GetProfiles"
+```
+
+Profile token names vary by vendor. Common examples:
+
+| Vendor | Typical tokens |
+|--------|----------------|
+| Dahua / Amcrest | `Profile_1`, `Profile_2` (or `MainStream`, `SubStream`) |
+| Hikvision | `main`, `sub` |
+| Axis | `profile_1_h264`, `view_area_1_profile_1` |
+| Reolink | `Preview_01_main`, `Preview_01_sub` |
+
+**Scope and limitations:**
+
+- One snapshot profile per camera IP. Multiple concurrent channels with
+  independent bounding-box coordinate spaces (e.g. four e-PTZ dewarped views
+  simultaneously) are not yet supported.
+- HTTPS snapshot endpoints are not yet supported; the recorder connects to the
+  discovered URI over plain HTTP.
+- The discovered URL is held in memory and re-discovered on each service restart
+  or camera reconnect — it is never written to the Protect database.

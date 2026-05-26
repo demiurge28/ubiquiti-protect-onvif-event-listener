@@ -1,4 +1,5 @@
 // Copyright 2026 Daniel W
+// Copyright 2026 Ben
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -180,6 +181,19 @@ class DetectionRecorder {
   /// any prior override.  Thread-safe.
   void set_camera_snapshot_url_path(const std::string& camera_ip,
                                     const std::string& path);
+
+  /// Called (from an ONVIF listener camera thread) when GetSnapshotUri
+  /// returns a snapshot URL for @p camera_ip.  Overrides the Protect-stored
+  /// snapshot URL but defers to any explicit --camera_snapshot_urls path.
+  /// Thread-safe; may be called at any time, including during on_event().
+  void OnSnapshotUrlDiscovered(const std::string& camera_ip,
+                               const std::string& snapshot_url);
+
+  /// Set the pixel resolution for a specific camera.
+  /// Used when computing the smartDetectObjectAreas bounding-box grid on
+  /// Protect 7.1+.  When not set, 1920×1080 is assumed as the fallback.
+  /// Must be called before run().
+  void set_camera_resolution(const std::string& camera_ip, int width, int height);
 
   /// Drop new detection events from a camera once it has produced more than
   /// @p n events in the last rolling hour.  Pass 0 for unlimited. Default: 10.
@@ -540,6 +554,18 @@ class DetectionRecorder {
   // the snapshot URL to http://<camera_ip><path> instead of using the URL the
   // camera advertised via ONVIF.
   std::map<std::string, std::string> camera_snapshot_url_paths_;
+
+  // Per-camera snapshot URLs discovered at runtime via ONVIF GetSnapshotUri.
+  // Written from camera worker threads via OnSnapshotUrlDiscovered() (under
+  // mu_); read in on_event() under the same lock.  Overrides the
+  // Protect-stored snapshot_info_ URL but defers to camera_snapshot_url_paths_.
+  std::map<std::string, std::string> discovered_snapshot_urls_;
+
+  // Per-camera pixel resolution {width, height} for smartDetectObjectAreas
+  // bounding-box grid computation on Protect 7.1+.
+  // Written before run() via set_camera_resolution(); read-only after that.
+  // Absent entries fall back to 1920×1080 (safer default than QHD).
+  std::map<std::string, std::pair<int, int>> camera_image_sizes_;
 
   // Coalescing: last completed event per (camera_ip, detection_type).
   // real_end_ms is the wall-clock time (ms) when the detection ended, without

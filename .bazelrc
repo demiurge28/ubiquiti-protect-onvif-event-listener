@@ -70,6 +70,14 @@ build:msan --copt=-O1
 # ---------------------------------------------------------------------------
 build:x86      --config=clang
 
+# Native ARM64 build (Apple Silicon via Docker colima).
+# Uses third_party from-source builds (same as x86) with ARM64-specific
+# openssl/curl variants, instead of the @arm64_sysroot cross-compile sysroot.
+# Used automatically by build-in-docker.sh --test on ARM64 hosts.
+build:arm64_native --config=clang
+build:arm64_native --define arm64_native=1
+build:arm64_native --platforms=//platforms:linux_arm64
+
 build:x86_asan --config=clang
 build:x86_asan --config=asan
 

@@ -1,4 +1,5 @@
 // Copyright 2026 Daniel W
+// Copyright 2026 Ben
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,8 +22,8 @@
 #include "onvif_listener.hpp"
 
 #include <curl/curl.h>
+#include <openssl/evp.h>
 #include <openssl/rand.h>
-#include <openssl/sha.h>
 #include <libxml/parser.h>
 #include <libxml/tree.h>
 #include <libxml/xpath.h>
@@ -129,16 +130,21 @@ WSSecurity make_wssecurity(const std::string& password) {
   std::string nonce_b64 = base64_encode(nonce, sizeof(nonce));
 
   // digest = Base64(SHA1(nonce_bytes || created || password))
+  // ONVIF WS-Security PasswordDigest mandates SHA-1 (OASIS spec, section 3.1);
+  // we use EVP_Digest + EVP_sha1() instead of the deprecated SHA1() call,
+  // which was removed in OpenSSL 4.0 and emits -Wdeprecated-declarations
+  // warnings on OpenSSL 3.x builds.
   std::vector<unsigned char> pre;
   pre.reserve(16 + created.size() + password.size());
   pre.insert(pre.end(), nonce, nonce + 16);
   pre.insert(pre.end(), created.begin(), created.end());
   pre.insert(pre.end(), password.begin(), password.end());
 
-  unsigned char hash[SHA_DIGEST_LENGTH];
-  SHA1(pre.data(), pre.size(), hash);
+  unsigned char hash[EVP_MAX_MD_SIZE];
+  unsigned int  hash_len = 0;
+  EVP_Digest(pre.data(), pre.size(), hash, &hash_len, EVP_sha1(), nullptr);
 
-  return {nonce_b64, created, base64_encode(hash, SHA_DIGEST_LENGTH)};
+  return {nonce_b64, created, base64_encode(hash, hash_len)};
 }
 
 // -------------------------------------------------------
@@ -163,7 +169,8 @@ std::string build_soap(
        "  xmlns:wsnt=\"http://docs.oasis-open.org/wsn/b-2\"\n"
        "  xmlns:wsa5=\"http://www.w3.org/2005/08/addressing\"\n"
        "  xmlns:tt=\"http://www.onvif.org/ver10/schema\"\n"
-       "  xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\">\n"
+       "  xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\"\n"
+       "  xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\">\n"
        "  <SOAP-ENV:Header>\n"
        "    <wsse:Security SOAP-ENV:mustUnderstand=\"true\">\n"
        "      <wsu:Timestamp wsu:Id=\"Time\">\n"
@@ -319,6 +326,8 @@ struct XmlDoc {
       BAD_CAST "http://www.onvif.org/ver10/schema");
     xmlXPathRegisterNs(c, BAD_CAST "tds",
       BAD_CAST "http://www.onvif.org/ver10/device/wsdl");
+    xmlXPathRegisterNs(c, BAD_CAST "trt",
+      BAD_CAST "http://www.onvif.org/ver10/media/wsdl");
   }
 
   using XPathObj = std::unique_ptr<xmlXPathObject, decltype(&xmlXPathFreeObject)>;
@@ -394,6 +403,7 @@ static std::string url_path(const std::string& url) {
 struct DiscoveredServices {
   std::string event_url;   // events service XAddr (fallback: /onvif/event_service)
   std::string alarm_url;   // alarm service XAddr; empty = no alarm service found
+  std::string media_url;   // ONVIF Media (ver10) service XAddr; empty = not advertised
 };
 
 // -------------------------------------------------------
@@ -428,8 +438,9 @@ class CameraWorker {
  public:
   CameraWorker(const CameraConfig& cfg,
                const EventCallback& cb,
-               const std::atomic<bool>& running)
-    : cfg_(cfg), cb_(cb), running_(running) {}
+               const std::atomic<bool>& running,
+               const SnapshotUrlCallback& snap_cb = {})
+    : cfg_(cfg), cb_(cb), running_(running), snapshot_url_cb_(snap_cb) {}
 
   void run() {
     LOG(INFO) << '[' << cfg_.ip << "] started";
@@ -442,6 +453,22 @@ class CameraWorker {
       // Discover event and alarm service URLs via GetServices (IncludeCapability=true).
       // Re-runs on every outer loop iteration so a camera restart is handled cleanly.
       const DiscoveredServices sv = discover_services();
+
+      // Discover the per-profile snapshot URI via the ONVIF Media service and
+      // notify the caller so it can override the Protect-stored snapshot URL.
+      // Runs on every (re)connect so the URL stays current after a camera
+      // restart.  Failures are soft: the Protect URL is used as fallback.
+      if (!sv.media_url.empty() && snapshot_url_cb_) {
+        const std::string snap_uri =
+            discover_snapshot_url(sv.media_url, cfg_.snapshot_profile);
+        if (!snap_uri.empty()) {
+          snapshot_url_cb_(cfg_.ip, snap_uri);
+        } else if (!cfg_.snapshot_profile.empty()) {
+          LOG(WARNING) << '[' << cfg_.ip << "] profile '"
+                       << cfg_.snapshot_profile
+                       << "' produced no snapshot URI -- using Protect's URL";
+        }
+      }
 
       auto sub_or = create_subscription(sv.event_url);
       if (!sub_or.ok()) {
@@ -676,6 +703,11 @@ class CameraWorker {
         } else if (ns.find("alarm") != std::string::npos) {
           LOG(INFO) << '[' << cfg_.ip << "] alarm service URL: " << xaddr;
           result.alarm_url = xaddr;
+        } else if ((ns.find("ver10/media") != std::string::npos ||
+                    ns.find("ver20/media") != std::string::npos) &&
+                   result.media_url.empty()) {
+          result.media_url = cfg_.http_base() + url_path(xaddr);
+          LOG(INFO) << '[' << cfg_.ip << "] media service URL: " << result.media_url;
         }
       }
     }
@@ -930,9 +962,101 @@ class CameraWorker {
     return out;
   }
 
+  // Calls GetProfiles on the ONVIF Media service and returns the token
+  // attribute of the first profile.  Returns empty on any failure.
+  std::string discover_first_profile(const std::string& media_url) {
+    static const char* ACTION =
+        "http://www.onvif.org/ver10/media/wsdl/GetProfiles";
+    const std::string body = "    <trt:GetProfiles/>\n";
+
+    auto soap = build_soap(cfg_.user, cfg_.password, body, media_url, ACTION);
+    auto resp_or = soap_post_r(media_url, soap, ACTION, 10);
+    if (!resp_or.ok() || resp_or->status_code != 200) {
+      LOG(INFO) << '[' << cfg_.ip << "] GetProfiles failed ("
+                << (resp_or.ok()
+                        ? "HTTP " + std::to_string(resp_or->status_code)
+                        : resp_or.status().message())
+                << ") -- no profile token";
+      return {};
+    }
+
+    auto doc_or = XmlDoc::Create(resp_or->body);
+    if (!doc_or.ok()) {
+      LOG(INFO) << '[' << cfg_.ip << "] GetProfiles parse error";
+      return {};
+    }
+
+    // Get the token attribute of the first Profiles element.
+    auto profiles = doc_or->xpath("//*[local-name()='Profiles']");
+    if (!profiles || !profiles->nodesetval ||
+        profiles->nodesetval->nodeNr == 0) {
+      LOG(INFO) << '[' << cfg_.ip << "] GetProfiles: no profiles returned";
+      return {};
+    }
+    xmlNodePtr first = profiles->nodesetval->nodeTab[0];
+    xmlChar* tok = xmlGetProp(first, BAD_CAST "token");
+    if (!tok) {
+      LOG(INFO) << '[' << cfg_.ip << "] GetProfiles: first profile has no token";
+      return {};
+    }
+    std::string token(reinterpret_cast<char*>(tok));
+    xmlFree(tok);
+    LOG(INFO) << '[' << cfg_.ip << "] auto-selected profile: " << token;
+    return token;
+  }
+
+  // Calls GetSnapshotUri for @p profile_token on the ONVIF Media service
+  // at @p media_url.  If @p profile_token is empty, auto-discovers the
+  // first available profile via GetProfiles first.
+  // Returns the URI string, or empty on any failure.
+  std::string discover_snapshot_url(const std::string& media_url,
+                                     const std::string& profile_token) {
+    static const char* ACTION =
+        "http://www.onvif.org/ver10/media/wsdl/GetSnapshotUri";
+
+    // Resolve profile token: use the configured one or discover the first.
+    std::string token = profile_token;
+    if (token.empty()) {
+      token = discover_first_profile(media_url);
+      if (token.empty()) return {};
+    }
+
+    const std::string body =
+        "    <trt:GetSnapshotUri>\n"
+        "      <trt:ProfileToken>" + token + "</trt:ProfileToken>\n"
+        "    </trt:GetSnapshotUri>\n";
+
+    auto soap = build_soap(cfg_.user, cfg_.password, body, media_url, ACTION);
+    auto resp_or = soap_post_r(media_url, soap, ACTION, 10);
+    if (!resp_or.ok()) {
+      LOG(INFO) << '[' << cfg_.ip << "] GetSnapshotUri: "
+                << resp_or.status().message();
+      return {};
+    }
+    if (resp_or->status_code != 200) {
+      LOG(INFO) << '[' << cfg_.ip << "] GetSnapshotUri HTTP "
+                << resp_or->status_code;
+      return {};
+    }
+
+    auto doc_or = XmlDoc::Create(resp_or->body);
+    if (!doc_or.ok()) {
+      LOG(INFO) << '[' << cfg_.ip << "] GetSnapshotUri parse error";
+      return {};
+    }
+
+    const std::string uri = XmlDoc::trim(
+        doc_or->text("//*[local-name()='Uri']"));
+    if (!uri.empty())
+      LOG(INFO) << '[' << cfg_.ip << "] snapshot URI (profile=" << token
+                << "): " << uri;
+    return uri;
+  }
+
   const CameraConfig&       cfg_;
   const EventCallback&      cb_;
   const std::atomic<bool>&  running_;
+  const SnapshotUrlCallback snapshot_url_cb_;  // optional; may be empty
 };
 
 }  // anonymous namespace
@@ -959,6 +1083,10 @@ void OnvifListener::enable_raw_recording(const std::string& path) {
   RawSink::instance().enable_disk(path);
 }
 
+void OnvifListener::set_snapshot_url_callback(SnapshotUrlCallback cb) {
+  snapshot_url_cb_ = std::move(cb);
+}
+
 void OnvifListener::run(EventCallback cb) {
   running_ = true;
 
@@ -967,7 +1095,7 @@ void OnvifListener::run(EventCallback cb) {
   workers.reserve(cameras_.size());
   for (const auto& cam : cameras_)
     workers.push_back(
-      std::make_unique<CameraWorker>(cam, cb, running_));
+      std::make_unique<CameraWorker>(cam, cb, running_, snapshot_url_cb_));
 
   // Launch one thread per camera
   std::vector<std::thread> threads;
@@ -994,7 +1122,7 @@ void OnvifListener::run(EventCallback cb) {
       for (auto& cfg : hot_adds) {
         cameras_.push_back(cfg);
         workers.push_back(
-            std::make_unique<CameraWorker>(cfg, cb, running_));
+            std::make_unique<CameraWorker>(cfg, cb, running_, snapshot_url_cb_));
         CameraWorker* ptr = workers.back().get();
         threads.emplace_back([ptr] { ptr->run(); });
       }

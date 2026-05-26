@@ -1,4 +1,5 @@
 // Copyright 2026 Daniel W
+// Copyright 2026 Ben
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -600,6 +601,167 @@ static void test_hot_add(const std::string& jsonl) {
 }
 
 // ============================================================
+// Helpers shared by snapshot-discovery tests
+// ============================================================
+
+// Run a listener with a SnapshotUrlCallback and collect events.
+// Returns the collected events, timeout status, and the last discovered URL.
+struct SnapshotDiscoveryResult {
+  std::vector<onvif::OnvifEvent> events;
+  bool        timed_out{false};
+  std::string discovered_url;
+  std::string discovered_ip;
+};
+
+static SnapshotDiscoveryResult collect_with_snapshot_callback(
+    const onvif::CameraConfig& cfg,
+    std::size_t n_events,
+    std::chrono::seconds timeout) {
+  std::mutex ev_mu;
+  std::condition_variable cv;
+  std::vector<onvif::OnvifEvent> evs;
+
+  std::mutex cb_mu;
+  std::string disc_url, disc_ip;
+
+  onvif::OnvifListener listener;
+  listener.add_camera(cfg);
+  listener.set_snapshot_url_callback(
+      [&](const std::string& ip, const std::string& url) {
+        std::lock_guard<std::mutex> lk(cb_mu);
+        disc_ip  = ip;
+        disc_url = url;
+      });
+
+  std::thread t([&] {
+    listener.run([&](const onvif::OnvifEvent& ev) {
+      std::lock_guard<std::mutex> lk(ev_mu);
+      evs.push_back(ev);
+      if (evs.size() >= n_events) cv.notify_one();
+    });
+  });
+
+  bool ok;
+  {
+    std::unique_lock<std::mutex> lk(ev_mu);
+    ok = cv.wait_for(lk, timeout, [&] { return evs.size() >= n_events; });
+  }
+  listener.stop();
+  t.join();
+
+  SnapshotDiscoveryResult r;
+  {
+    std::lock_guard<std::mutex> lk(ev_mu);
+    r.events = std::move(evs);
+  }
+  r.timed_out = !ok;
+  {
+    std::lock_guard<std::mutex> lk(cb_mu);
+    r.discovered_url = disc_url;
+    r.discovered_ip  = disc_ip;
+  }
+  return r;
+}
+
+// ============================================================
+// Test: snapshot URL discovery via media service -- auto profile
+//
+// MediaServiceEmulator advertises a media service in GetServices.
+// With an empty snapshot_profile, the listener should auto-discover
+// the first available profile ("MainStream") via GetProfiles and
+// fire SnapshotUrlCallback with the GetSnapshotUri result.
+// ============================================================
+static void test_snapshot_discovery_auto_profile() {
+  MediaServiceEmulator emu;
+  emu.start();
+
+  onvif::CameraConfig cfg;
+  cfg.ip                 = emu.local_address();
+  cfg.user               = "admin";
+  cfg.password           = "test";
+  cfg.retry_interval_sec = 1;
+  // cfg.snapshot_profile intentionally left empty → auto-discover
+
+  auto r = collect_with_snapshot_callback(cfg, 2, std::chrono::seconds(30));
+
+  CHECK(!r.timed_out, "snapshot_discovery_auto: timed out waiting for events");
+  CHECK(r.events.size() >= 2,
+        "snapshot_discovery_auto: expected >= 2 events, got: " +
+        std::to_string(r.events.size()));
+  CHECK(!r.discovered_url.empty(),
+        "snapshot_discovery_auto: SnapshotUrlCallback was not fired");
+  CHECK(r.discovered_ip == emu.local_address(),
+        "snapshot_discovery_auto: callback ip mismatch: " + r.discovered_ip);
+  // Auto-select picks the first profile returned by GetProfiles: MainStream.
+  CHECK(r.discovered_url.find("MainStream") != std::string::npos,
+        "snapshot_discovery_auto: expected MainStream in URL: " +
+        r.discovered_url);
+  // The emulator should have received exactly one GetSnapshotUri call.
+  const auto tokens = emu.snapshot_uri_tokens();
+  CHECK(!tokens.empty(), "snapshot_discovery_auto: GetSnapshotUri not called");
+  CHECK(!tokens.empty() && tokens.front() == "MainStream",
+        "snapshot_discovery_auto: GetSnapshotUri used wrong profile: " +
+        (tokens.empty() ? "(none)" : tokens.front()));
+}
+
+// ============================================================
+// Test: snapshot URL discovery -- explicit profile token
+//
+// When CameraConfig::snapshot_profile is set to "SubStream",
+// GetProfiles should be skipped and GetSnapshotUri called directly
+// with that token, returning the SubStream URL.
+// ============================================================
+static void test_snapshot_discovery_explicit_profile() {
+  MediaServiceEmulator emu;
+  emu.start();
+
+  onvif::CameraConfig cfg;
+  cfg.ip                 = emu.local_address();
+  cfg.user               = "admin";
+  cfg.password           = "test";
+  cfg.retry_interval_sec = 1;
+  cfg.snapshot_profile   = "SubStream";  // explicit override
+
+  auto r = collect_with_snapshot_callback(cfg, 2, std::chrono::seconds(30));
+
+  CHECK(!r.timed_out, "snapshot_discovery_explicit: timed out waiting for events");
+  CHECK(!r.discovered_url.empty(),
+        "snapshot_discovery_explicit: SnapshotUrlCallback was not fired");
+  CHECK(r.discovered_url.find("SubStream") != std::string::npos,
+        "snapshot_discovery_explicit: expected SubStream in URL: " +
+        r.discovered_url);
+  // GetProfiles should NOT have been called (explicit profile skips auto-discovery).
+  const auto tokens = emu.snapshot_uri_tokens();
+  CHECK(!tokens.empty() && tokens.front() == "SubStream",
+        "snapshot_discovery_explicit: GetSnapshotUri used wrong profile: " +
+        (tokens.empty() ? "(none)" : tokens.front()));
+}
+
+// ============================================================
+// Test: no snapshot URL callback when no media service advertised
+//
+// AxisReferenceParamsEmulator only advertises the events service,
+// not a media service.  The SnapshotUrlCallback must not be invoked.
+// ============================================================
+static void test_snapshot_discovery_no_media_service() {
+  AxisReferenceParamsEmulator emu;
+  emu.start();
+
+  onvif::CameraConfig cfg;
+  cfg.ip                 = emu.local_address();
+  cfg.user               = "root";
+  cfg.password           = "password";
+  cfg.retry_interval_sec = 1;
+
+  auto r = collect_with_snapshot_callback(cfg, 2, std::chrono::seconds(30));
+
+  CHECK(!r.timed_out, "snapshot_discovery_no_media: timed out waiting for events");
+  CHECK(r.discovered_url.empty(),
+        "snapshot_discovery_no_media: callback should NOT fire without media "
+        "service, but got URL: " + r.discovered_url);
+}
+
+// ============================================================
 // main
 // ============================================================
 int main(int argc, char* argv[]) {
@@ -678,6 +840,12 @@ int main(int argc, char* argv[]) {
            [&] { test_both_cameras(hikvision_jsonl, dahua_jsonl); });
   run_test("axis_ref_params",
            [] { test_axis_ref_params(); });
+  run_test("snapshot_discovery_auto_profile",
+           [] { test_snapshot_discovery_auto_profile(); });
+  run_test("snapshot_discovery_explicit_profile",
+           [] { test_snapshot_discovery_explicit_profile(); });
+  run_test("snapshot_discovery_no_media_service",
+           [] { test_snapshot_discovery_no_media_service(); });
 
   onvif::global_cleanup();
 

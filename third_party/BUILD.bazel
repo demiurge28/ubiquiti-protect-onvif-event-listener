@@ -208,6 +208,75 @@ configure_make(
     visibility = ["//visibility:public"],
 )
 
+# ---- OpenSSL — ARM64 native build ----
+# Same as :openssl but targets linux-aarch64 for native compilation on ARM64
+# hosts (arm64_native config).  Cross-compiled builds use @arm64_sysroot.
+configure_make(
+    name = "openssl_arm64_native",
+    lib_source = "@openssl_src//:all",
+    configure_command = "Configure",
+    configure_in_place = True,
+    configure_options = [
+        "linux-aarch64",
+        "--libdir=lib",
+        "no-shared",
+        "no-tests",
+        "no-apps",
+        "no-docs",
+    ],
+    env = {"PERL": "perl"},
+    out_static_libs = [
+        "libssl.a",
+        "libcrypto.a",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# ---- libcurl — ARM64 native build ----
+# Same as :libcurl but links against :openssl_arm64_native and omits nghttp2
+# (HTTP/2 is not needed for test builds; only the production binary uses MSR
+# gRPC over HTTP/2).
+cmake(
+    name = "libcurl_arm64_native",
+    lib_source = "@curl_src//:all",
+    deps = [":openssl_arm64_native"],
+    out_static_libs = ["libcurl.a"],
+    cache_entries = {
+        "BUILD_SHARED_LIBS": "OFF",
+        "BUILD_STATIC_LIBS": "ON",
+        "BUILD_CURL_EXE": "OFF",
+        "BUILD_TESTING": "OFF",
+        "CURL_USE_PKGCONFIG": "OFF",
+        "CURL_USE_OPENSSL": "ON",
+        "CURL_USE_GNUTLS": "OFF",
+        "CURL_USE_MBEDTLS": "OFF",
+        "CURL_USE_LIBSSH2": "OFF",
+        "CURL_USE_LIBPSL": "OFF",
+        "CURL_ZLIB": "OFF",
+        "CURL_DISABLE_FTP": "ON",
+        "CURL_DISABLE_SMTP": "ON",
+        "CURL_DISABLE_IMAP": "ON",
+        "CURL_DISABLE_POP3": "ON",
+        "CURL_DISABLE_TELNET": "ON",
+        "CURL_DISABLE_TFTP": "ON",
+        "CURL_DISABLE_MQTT": "ON",
+        "CURL_DISABLE_DICT": "ON",
+        "CURL_DISABLE_GOPHER": "ON",
+        "CURL_DISABLE_LDAP": "ON",
+        "CURL_DISABLE_LDAPS": "ON",
+        "CURL_DISABLE_RTSP": "ON",
+        "CURL_DISABLE_SMB": "ON",
+        "CURL_DISABLE_WEBSOCKETS": "ON",
+        "USE_NGHTTP2": "OFF",
+        "CURL_BROTLI": "OFF",
+        "CURL_ZSTD": "OFF",
+        "USE_LIBIDN2": "OFF",
+        "OPENSSL_ROOT_DIR": "$$EXT_BUILD_DEPS$$/openssl_arm64_native",
+        "CMAKE_INSTALL_LIBDIR": "lib",
+    },
+    visibility = ["//visibility:public"],
+)
+
 # ---- libxml2 (git submodule: third_party/libxml2) ----
 # Minimal build: no Python, ICU, lzma, zlib, or CLI programs.
 # Headers install to include/libxml2/libxml/; set out_include_dir accordingly

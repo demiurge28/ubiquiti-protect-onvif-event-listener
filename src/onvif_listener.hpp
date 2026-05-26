@@ -1,4 +1,5 @@
 // Copyright 2026 Daniel W
+// Copyright 2026 Ben
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -114,7 +115,12 @@ struct CameraConfig {
     std::string ip;           ///< Host or host:port, e.g. "192.168.1.108" or "192.168.1.108:8080"
     std::string user;
     std::string password;
-    std::string snapshot_url;  ///< Optional HTTP URL used to capture a snapshot image
+    std::string snapshot_url;     ///< Optional HTTP URL used to capture a snapshot image
+    /// ONVIF Media service profile token used to discover the per-profile
+    /// snapshot URL via GetSnapshotUri.  Empty = auto-discover the first
+    /// available profile.  Overridden at runtime by the discovered URL;
+    /// falls back to snapshot_url when discovery fails.
+    std::string snapshot_profile;
 
     /// Returns "http://host" or "http://host:port".
     /// All HTTP URL construction must go through this method so that port
@@ -126,9 +132,22 @@ struct CameraConfig {
     ///< After hitting max_consecutive_failures, wait this long before resetting
     ///< the failure counter and retrying. Default: 3600 s (1 hour).
     int failure_window_sec{3600};
+    ///< Sensor resolution in pixels.  0×0 = unknown.  Used when computing
+    ///< the smartDetectObjectAreas bounding-box grid on Protect 7.1+.
+    ///< Populate via --camera_resolutions when ONVIF discovery is unavailable.
+    int image_width{0};
+    int image_height{0};
 };
 
 using EventCallback = std::function<void(const OnvifEvent&)>;
+
+// Called from a camera worker thread (once per reconnect) when the ONVIF
+// Media service successfully returns a snapshot URI for the configured or
+// auto-discovered profile.  The implementor should update its snapshot URL
+// for @p camera_ip to @p snapshot_url.  Must be thread-safe.
+using SnapshotUrlCallback =
+    std::function<void(const std::string& camera_ip,
+                       const std::string& snapshot_url)>;
 
 // ---------------------------------------------------------------
 // Library lifecycle -- call once from main() around all listeners
@@ -183,6 +202,13 @@ class OnvifListener {
     /// Must be called before run().  Pass an empty string to disable.
     void enable_raw_recording(const std::string& path);
 
+    /// Register a callback invoked once per camera (on each reconnect)
+    /// when the ONVIF Media service successfully returns a snapshot URI
+    /// for the camera's configured (or auto-discovered) profile.  The
+    /// callback is called from the camera's worker thread and must be
+    /// thread-safe.  Must be called before run().
+    void set_snapshot_url_callback(SnapshotUrlCallback cb);
+
     /// Spawn one thread per camera. Invoke cb for every received event
     /// (from the camera's own thread -- cb must be thread-safe).
     /// Blocks until stop() is called and all threads have exited (or a
@@ -198,6 +224,7 @@ class OnvifListener {
  private:
     std::atomic<bool>         running_{false};
     std::vector<CameraConfig> cameras_;
+    SnapshotUrlCallback       snapshot_url_cb_;  // optional; set before run()
 
     // Queue of cameras added via add_camera_live() after run() started.
     // Drained by run()'s supervisor loop under pending_mutex_.

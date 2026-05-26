@@ -1,4 +1,5 @@
 // Copyright 2026 Daniel W
+// Copyright 2026 Ben
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -247,6 +248,38 @@ class ReolinkCameraEmulator : public OnvifCameraEmulator {
   std::size_t     pull_idx_{0};
   std::size_t     renew_idx_{0};
   std::mutex      mu_;
+};
+
+// ============================================================
+// MediaServiceEmulator -- synthetic camera that advertises both ONVIF
+// event service AND media service (ver10) in its GetServices response.
+//
+// Serves:
+//   GetServices     → event + media service entries
+//   GetProfiles     → two profiles: "MainStream" and "SubStream"
+//   GetSnapshotUri  → http://<ip>/onvif/snapshot?profile=<token>
+//   CreatePullPointSubscription, PullMessages → standard motion events
+//
+// Used to verify that OnvifListener correctly discovers snapshot URLs
+// via GetProfiles + GetSnapshotUri and fires the SnapshotUrlCallback.
+// ============================================================
+class MediaServiceEmulator : public OnvifCameraEmulator {
+ public:
+  MediaServiceEmulator();
+
+  /// Profile tokens received in GetSnapshotUri calls (thread-safe).
+  std::vector<std::string> snapshot_uri_tokens() const;
+
+ protected:
+  std::pair<int, std::string> handle(
+    const std::string& path,
+    const std::string& soap_action,
+    const std::string& body) override;
+
+ private:
+  mutable std::mutex        mu_;
+  std::vector<std::string>  snapshot_uri_tokens_;
+  bool                      subscribed_{false};
 };
 
 // ============================================================
