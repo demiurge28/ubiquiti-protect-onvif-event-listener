@@ -3,6 +3,14 @@ config_setting(
     constraint_values = ["@platforms//cpu:aarch64"],
 )
 
+# Matches --config=arm64_native: native ARM64 build using third_party from-source
+# libs instead of the @arm64_sysroot cross-compile sysroot.
+config_setting(
+    name = "arm64_native",
+    constraint_values = ["@platforms//cpu:aarch64"],
+    define_values = {"arm64_native": "1"},
+)
+
 filegroup(
     name = "tsan_suppressions",
     srcs = ["tsan_suppressions.txt"],
@@ -39,6 +47,7 @@ cc_library(
     srcs = ["onvif_camera_emulator.cpp"],
     hdrs = ["onvif_camera_emulator.hpp"],
     deps = select({
+        ":arm64_native": ["//third_party:libmicrohttpd"],
         ":is_arm64": ["@arm64_sysroot//:libmicrohttpd"],
         "//conditions:default": ["//third_party:libmicrohttpd"],
     }),

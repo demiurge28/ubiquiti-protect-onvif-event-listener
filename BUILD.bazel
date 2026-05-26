@@ -7,22 +7,44 @@ fdo_profile(
 )
 
 # Platform-select helpers.
-# x86 host: built from source via git submodules (//third_party:...).
-# ARM64: pre-built sysroot downloaded by arm64_sysroot repository rule.
-_XML2   = select({"@platforms//cpu:aarch64": ["@arm64_sysroot//:libxml2"],
-                  "//conditions:default":    ["//third_party:libxml2"]})
-_CURL   = select({"@platforms//cpu:aarch64": ["@arm64_sysroot//:libcurl"],
-                  "//conditions:default":    ["//third_party:libcurl"]})
-_SSL    = select({"@platforms//cpu:aarch64": ["@arm64_sysroot//:openssl"],
-                  "//conditions:default":    ["//third_party:openssl"]})
-_MHD    = select({"@platforms//cpu:aarch64": ["@arm64_sysroot//:libmicrohttpd"],
-                  "//conditions:default":    ["//third_party:libmicrohttpd"]})
-_PQ     = select({"@platforms//cpu:aarch64": ["@arm64_sysroot//:libpq"],
-                  "//conditions:default":    ["//third_party:libpq"]})
-_JPEG   = select({"@platforms//cpu:aarch64": ["@arm64_sysroot//:libjpeg"],
-                  "//conditions:default":    ["//third_party:libjpeg_turbo"]})
-_ZSTD   = select({"@platforms//cpu:aarch64": ["//third_party:zstd_arm64"],
-                  "//conditions:default":    ["//third_party:zstd"]})
+# Three build configurations:
+#   arm64_native  — native ARM64 (Apple Silicon dev via Docker colima):
+#                   third_party source builds, ARM64 openssl/curl variants.
+#   aarch64 cross — cross-compiled from x86-64 host to ARM64 target:
+#                   pre-built sysroot from arm64_sysroot repository rule.
+#   x86-64 native — third_party source builds, standard x86-64 targets.
+
+# arm64_native is set when --define arm64_native=1 is passed together with
+# --platforms=//platforms:linux_arm64 (i.e. --config=arm64_native).
+# Because it adds an extra define constraint on top of aarch64, Bazel treats
+# it as a strict refinement of @platforms//cpu:aarch64 and picks it first.
+config_setting(
+    name = "arm64_native",
+    constraint_values = ["@platforms//cpu:aarch64"],
+    define_values = {"arm64_native": "1"},
+)
+
+_XML2   = select({":arm64_native":             ["//third_party:libxml2"],
+                  "@platforms//cpu:aarch64":   ["@arm64_sysroot//:libxml2"],
+                  "//conditions:default":      ["//third_party:libxml2"]})
+_CURL   = select({":arm64_native":             ["//third_party:libcurl_arm64_native"],
+                  "@platforms//cpu:aarch64":   ["@arm64_sysroot//:libcurl"],
+                  "//conditions:default":      ["//third_party:libcurl"]})
+_SSL    = select({":arm64_native":             ["//third_party:openssl_arm64_native"],
+                  "@platforms//cpu:aarch64":   ["@arm64_sysroot//:openssl"],
+                  "//conditions:default":      ["//third_party:openssl"]})
+_MHD    = select({":arm64_native":             ["//third_party:libmicrohttpd"],
+                  "@platforms//cpu:aarch64":   ["@arm64_sysroot//:libmicrohttpd"],
+                  "//conditions:default":      ["//third_party:libmicrohttpd"]})
+_PQ     = select({":arm64_native":             ["//third_party:libpq"],
+                  "@platforms//cpu:aarch64":   ["@arm64_sysroot//:libpq"],
+                  "//conditions:default":      ["//third_party:libpq"]})
+_JPEG   = select({":arm64_native":             ["//third_party:libjpeg_turbo"],
+                  "@platforms//cpu:aarch64":   ["@arm64_sysroot//:libjpeg"],
+                  "//conditions:default":      ["//third_party:libjpeg_turbo"]})
+_ZSTD   = select({":arm64_native":             ["//third_party:zstd"],
+                  "@platforms//cpu:aarch64":   ["//third_party:zstd_arm64"],
+                  "//conditions:default":      ["//third_party:zstd"]})
 
 # tcmalloc_minimal — replaces glibc ptmalloc as the process allocator.
 # Linked into //:onvif_recorder only, via the tcmalloc_force_link
@@ -32,6 +54,7 @@ _ZSTD   = select({"@platforms//cpu:aarch64": ["//third_party:zstd_arm64"],
 # glibc's weak versions (which would otherwise satisfy the references
 # and prevent tcmalloc's .o files from being pulled in at all).
 _TCMALLOC = select({
+    ":arm64_native":           ["//third_party:tcmalloc"],
     "@platforms//cpu:aarch64": ["//third_party:tcmalloc_arm64"],
     "//conditions:default":    ["//third_party:tcmalloc"],
 })
@@ -45,6 +68,7 @@ cc_library(
 # NCNN dependency: built from source for both x86 and ARM64.
 # ARM64 uses a separate cmake target that sets cross-compilation flags.
 _NCNN_DEPS = select({
+    ":arm64_native":           ["//third_party:ncnn"],
     "@platforms//cpu:aarch64": ["//third_party:ncnn_arm64"],
     "//conditions:default":    ["//third_party:ncnn"],
 })

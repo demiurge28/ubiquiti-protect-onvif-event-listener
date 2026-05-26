@@ -143,8 +143,8 @@ if $RUN_TESTS; then
     # --config=x86 only works on x86-64 hosts where the host libraries are used.
     DOCKER_ARCH=$(uname -m)
     if [ "$DOCKER_ARCH" = "aarch64" ] || [ "$DOCKER_ARCH" = "arm64" ]; then
-        echo "    (ARM64 host: using --config=arm64 for tests)"
-        run "arm64" "test --config=arm64 //test:all"
+        echo "    (ARM64 host: using --config=arm64_native for tests)"
+        run "arm64_native" "test --config=arm64_native //test:all"
     else
         run "x86" "test --config=x86 //test:all"
     fi
