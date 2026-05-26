@@ -17,7 +17,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE="onvif-recorder-builder:v2"  # bump tag when Dockerfile package list changes
+IMAGE="onvif-recorder-builder:v3"  # bump tag when Dockerfile package list changes
 CACHE_VOL="onvif-recorder-bazel-cache"
 
 # File that records the git commit SHA of the last successful ARM64 Docker build.
@@ -84,9 +84,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # Install Bazelisk as /usr/local/bin/bazel; it downloads the correct Bazel
-# version from .bazelversion on first use.
-RUN curl -fsSL -o /usr/local/bin/bazel \
-    https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 \
+# version from .bazelversion on first use.  Select the binary for the
+# container's native architecture (amd64 or arm64).
+RUN arch=$(dpkg --print-architecture) \
+  && curl -fsSL -o /usr/local/bin/bazel \
+    "https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-${arch}" \
   && chmod +x /usr/local/bin/bazel
 DOCKERFILE
 fi
@@ -120,15 +122,32 @@ run() {
 # 3. Build and copy outputs to dist/
 # ---------------------------------------------------------------------------
 if $BUILD_X86; then
-    echo "==> Building x86-64 binary ..."
-    run "x86" "build --config=x86 //:onvif_recorder \
-      && cp -f bazel-bin/onvif_recorder dist/onvif_recorder"
-    echo "==> dist/onvif_recorder"
+    # Skip the x86-64 binary build when running on ARM64 (tests run natively
+    # with --config=arm64 instead; the x86 config is for x86-64 Linux hosts).
+    HOST_ARCH=$(uname -m)
+    if [ "$HOST_ARCH" = "aarch64" ] || [ "$HOST_ARCH" = "arm64" ]; then
+        echo "==> Skipping x86-64 binary build (ARM64 host)"
+    else
+        echo "==> Building x86-64 binary ..."
+        run "x86" "build --config=x86 //:onvif_recorder \
+          && cp -f bazel-bin/onvif_recorder dist/onvif_recorder"
+        echo "==> dist/onvif_recorder"
+    fi
 fi
 
 if $RUN_TESTS; then
     echo "==> Running tests ..."
-    run "x86" "test --config=x86 //test:all"
+    # Select the test build config based on the container's native architecture.
+    # On ARM64 hosts (Apple Silicon + colima), --config=arm64 activates the
+    # arm64_sysroot cross-toolchain which provides the prebuilt system headers;
+    # --config=x86 only works on x86-64 hosts where the host libraries are used.
+    DOCKER_ARCH=$(uname -m)
+    if [ "$DOCKER_ARCH" = "aarch64" ] || [ "$DOCKER_ARCH" = "arm64" ]; then
+        echo "    (ARM64 host: using --config=arm64 for tests)"
+        run "arm64" "test --config=arm64 //test:all"
+    else
+        run "x86" "test --config=x86 //test:all"
+    fi
 fi
 
 if $BUILD_ARM64; then
