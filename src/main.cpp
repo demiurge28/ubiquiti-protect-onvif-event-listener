@@ -1,4 +1,5 @@
 // Copyright 2026 Daniel W
+// Copyright 2026 Ben
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -204,6 +205,23 @@ ABSL_FLAG(std::string, camera_snapshot_urls, "",
     "(common on Dahua, see issue #32).  The path is appended to "
     "http://<camera_ip>/ and authenticated with the camera's username "
     "and password from the Protect cameras table.");
+ABSL_FLAG(std::string, camera_resolutions, "",
+    "Per-camera pixel resolutions as comma-separated ip=WxH pairs, "
+    "e.g. '192.168.1.108=1920x1080,192.168.1.109=2560x1440'. "
+    "Used when computing the smartDetectObjectAreas bounding-box grid on "
+    "Protect 7.1+ (the area overlay in the Protect UI). "
+    "Defaults to 1920x1080 for cameras without an explicit entry. "
+    "Provide accurate values for cameras using non-1080p streams to "
+    "ensure the bbox grid aligns correctly with the sensor.");
+ABSL_FLAG(std::string, camera_snapshot_profiles, "",
+    "Per-camera ONVIF Media profile token for snapshot discovery as "
+    "comma-separated ip=token pairs, "
+    "e.g. '192.168.1.108=MainStream,192.168.1.109=SubStream'. "
+    "When set, GetSnapshotUri is called with the specified profile token "
+    "on each (re)connect and the returned URL overrides the Protect-stored "
+    "snapshot URL.  Leave empty to auto-discover the first available "
+    "profile. Useful for multi-profile cameras (fisheye, e-PTZ) whose "
+    "default Protect snapshot URL points at the wrong channel.");
 ABSL_FLAG(std::string, rtsp_audio, "",
     "Set enableRtspAudio in the Protect database for all adopted third-party "
     "cameras that have audio capability (hasAudio=true). "
@@ -720,6 +738,24 @@ int main(int argc, char* argv[]) {
       [&](const std::string& ip, const std::string& v) {
         det_rec.set_camera_snapshot_url_path(ip, v);
       });
+  for_each_ip_value(absl::GetFlag(FLAGS_camera_resolutions),
+      [&](const std::string& ip, const std::string& v) {
+        // Parse WxH (e.g. "1920x1080").
+        const size_t x = v.find('x');
+        if (x != std::string::npos) {
+          const int w = std::atoi(v.substr(0, x).c_str());
+          const int h = std::atoi(v.substr(x + 1).c_str());
+          if (w > 0 && h > 0) det_rec.set_camera_resolution(ip, w, h);
+        }
+      });
+
+  // Build a map of camera IP -> snapshot profile token from
+  // --camera_snapshot_profiles for use when registering cameras below.
+  std::map<std::string, std::string> snapshot_profiles_map;
+  for_each_ip_value(absl::GetFlag(FLAGS_camera_snapshot_profiles),
+      [&](const std::string& ip, const std::string& token) {
+        if (!token.empty()) snapshot_profiles_map[ip] = token;
+      });
 
   // Load NanoDet-M for thumbnail subject cropping, downloading if needed.
   std::unique_ptr<object_detect::ObjectDetector> detector;
@@ -752,6 +788,14 @@ int main(int argc, char* argv[]) {
   g_listener = &listener;
   std::signal(SIGINT,  signal_handler);
   std::signal(SIGTERM, signal_handler);
+
+  // Wire OnvifListener -> DetectionRecorder: when a camera worker discovers
+  // a snapshot URL via ONVIF GetSnapshotUri, update the recorder so subsequent
+  // detections use the profile-specific URL instead of the Protect-stored one.
+  listener.set_snapshot_url_callback(
+      [&det_rec](const std::string& ip, const std::string& url) {
+        det_rec.OnSnapshotUrlDiscovered(ip, url);
+      });
 
   if (!thumbs_dir.empty())
     det_rec.set_ubv_dir(thumbs_dir);
@@ -1089,6 +1133,10 @@ int main(int argc, char* argv[]) {
 
   for (auto cam : cameras) {
     cam.max_consecutive_failures = 3;
+    // Apply per-camera snapshot profile token if configured.
+    auto sp_it = snapshot_profiles_map.find(cam.ip);
+    if (sp_it != snapshot_profiles_map.end())
+      cam.snapshot_profile = sp_it->second;
     listener.add_camera(cam);
     det_rec.set_snapshot(cam);
     LOG(INFO) << "Watching camera " << cam.ip;
@@ -1181,6 +1229,10 @@ int main(int argc, char* argv[]) {
                      << s.message();
       for (auto cam : fresh) {
         cam.max_consecutive_failures = 3;
+        // Apply per-camera snapshot profile token if configured.
+        auto sp_it = snapshot_profiles_map.find(cam.ip);
+        if (sp_it != snapshot_profiles_map.end())
+          cam.snapshot_profile = sp_it->second;
         known_ids.insert(cam.id);
         det_rec.set_snapshot(cam);
         listener.add_camera_live(cam);

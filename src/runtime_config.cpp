@@ -1,4 +1,5 @@
 // Copyright 2026 Daniel W
+// Copyright 2026 Ben
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -103,6 +104,25 @@ const std::vector<Entry>& Schema() {
      "Per-camera snapshot-path overrides as comma-separated ip=path pairs, "
      "e.g. 192.168.1.107=/cgi-bin/snapshot.cgi.  Useful when the "
      "ONVIF-advertised snapshotUrl is wrong (common on Dahua, issue #32).",
+     "Cameras"},
+    {"camera_resolutions", Type::String,
+     "Per-camera pixel resolutions as comma-separated ip=WxH pairs, "
+     "e.g. 192.168.1.108=1920x1080,192.168.1.109=2560x1440.  "
+     "Used when computing the smartDetectObjectAreas bounding-box grid on "
+     "Protect 7.1+ (the area overlay in the Protect UI).  "
+     "Defaults to 1920x1080 for cameras without an explicit entry.  "
+     "Provide accurate values for non-1080p cameras (4K, fisheye, etc.) "
+     "to keep the bbox grid aligned with the sensor.",
+     "Cameras"},
+    {"camera_snapshot_profiles", Type::String,
+     "Per-camera ONVIF Media profile token for snapshot discovery as "
+     "comma-separated ip=token pairs, "
+     "e.g. 192.168.1.108=MainStream,192.168.1.109=SubStream.  "
+     "When set, GetSnapshotUri is called with the specified profile token "
+     "on each (re)connect and the returned URL replaces the Protect-stored "
+     "snapshot URL.  Leave empty to auto-discover the first available "
+     "profile.  Useful for multi-profile cameras (fisheye, e-PTZ) where the "
+     "default Protect snapshot URL points at the wrong channel.",
      "Cameras"},
 
     // ---- MSR forwarding ----

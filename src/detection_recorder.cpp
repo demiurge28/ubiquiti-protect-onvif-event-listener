@@ -1,4 +1,5 @@
 // Copyright 2026 Daniel W
+// Copyright 2026 Ben
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1278,6 +1279,15 @@ void DetectionRecorder::on_event(const OnvifEvent& ev) {
         snap_user = it->second.user;
         snap_pass = it->second.password;
       }
+      // ONVIF-discovered snapshot URL (from GetSnapshotUri via media service).
+      // Overrides the Protect-stored URL but defers to the explicit
+      // --camera_snapshot_urls path override below.  Credentials still come
+      // from snapshot_info_ (camera config).
+      {
+        auto dit = discovered_snapshot_urls_.find(ev.camera_ip);
+        if (dit != discovered_snapshot_urls_.end() && !dit->second.empty())
+          snap_url = dit->second;
+      }
       // --camera_snapshot_urls override: rewrite the snapshot URL to
       // http://<camera_ip><path> (auth from the original cam config still
       // applies).  Useful when the ONVIF-advertised snapshotUrl is wrong,
@@ -1511,12 +1521,22 @@ void DetectionRecorder::on_event(const OnvifEvent& ev) {
       ein.thumbnail_id      = thumb_id;
       ein.start_ms          = ts_ms;
       ein.end_ms            = ts_ms;
-      // TODO: thread the camera's actual image dimensions through to here.
-      // Defaulting matches event_enricher's default; the bbox is placeholder
-      // anyway.  When we wire ONVIF tt:BoundingBox into the live path we
-      // can compute the real bbox + grid intersection here too.
-      ein.image_width       = 2560;
-      ein.image_height      = 1440;
+      // Use the per-camera resolution from set_camera_resolution() when
+      // available (populated from --camera_resolutions at startup), falling
+      // back to 1920x1080.  The 1080p default is a better common denominator
+      // than the previous QHD hardcode (most cameras are 1080p or smaller).
+      // TODO: auto-discover via ONVIF GetVideoEncoderConfiguration when no
+      // explicit override is provided so bbox grid accuracy is always correct.
+      {
+        auto it_res = camera_image_sizes_.find(ev.camera_ip);
+        if (it_res != camera_image_sizes_.end()) {
+          ein.image_width  = it_res->second.first;
+          ein.image_height = it_res->second.second;
+        } else {
+          ein.image_width  = 1920;
+          ein.image_height = 1080;
+        }
+      }
       ein.object_ids        = {sdo_id};
       rich_metadata = onvif::enricher::BuildEnrichedMetadata(ein);
       rich_bbox = onvif::enricher::PlaceholderBbox(
@@ -1729,6 +1749,23 @@ void DetectionRecorder::set_camera_snapshot_url_path(const std::string& ip,
     camera_snapshot_url_paths_.erase(ip);
   else
     camera_snapshot_url_paths_[ip] = path;
+}
+
+void DetectionRecorder::OnSnapshotUrlDiscovered(
+    const std::string& camera_ip, const std::string& snapshot_url) {
+  if (snapshot_url.empty()) return;
+  absl::MutexLock lk(&mu_);
+  discovered_snapshot_urls_[camera_ip] = snapshot_url;
+  LOG(INFO) << '[' << camera_ip << "] snapshot URL updated via ONVIF discovery: "
+            << snapshot_url;
+}
+
+void DetectionRecorder::set_camera_resolution(const std::string& ip,
+                                              int width, int height) {
+  // Write-before-run: no lock required (camera_image_sizes_ is read-only
+  // once on_event() traffic starts, just like snapshot_info_).
+  if (width > 0 && height > 0)
+    camera_image_sizes_[ip] = {width, height};
 }
 
 }  // namespace onvif

@@ -128,7 +128,26 @@ Admin UI -> Detection -> camera_object_types
   -> 192.168.1.108=animal -> Save & restart
 ```
 
+### Example: select a specific ONVIF media profile for snapshots
 
+Multi-channel cameras (fisheye, e-PTZ) can expose several ONVIF media profiles,
+each with its own snapshot URL. By default the recorder auto-discovers the first
+available profile via `GetProfiles` + `GetSnapshotUri`. To pin a specific profile:
+
+```
+Admin UI -> Cameras -> camera_snapshot_profiles
+  -> 192.168.1.108=MainStream -> Save & restart
+```
+
+Leave the field empty to keep auto-discovery. Use `--raw_log` to inspect the
+profile tokens your camera advertises:
+
+```bash
+/usr/bin/onvif-recorder --verbose --raw_log=/tmp/onvif-raw.jsonl
+# grep GetProfiles in /tmp/onvif-raw.jsonl to see available profile tokens
+```
+
+---
 
 ## Troubleshooting
 

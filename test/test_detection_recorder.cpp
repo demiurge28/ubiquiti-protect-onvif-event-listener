@@ -1,4 +1,5 @@
 // Copyright 2026 Daniel W
+// Copyright 2026 Ben
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -2686,6 +2687,65 @@ static void test_version_gate_rich_path_on_7_1() {
   onvif::protect_version::ResetForTesting();
 }
 
+// ============================================================
+// Test: OnSnapshotUrlDiscovered() overrides the Protect-stored URL
+//
+// The emulator for ONVIF events carries an empty JPEG snapshot (Protect
+// URL), so without discovery no thumbnail is written.  After calling
+// OnSnapshotUrlDiscovered with a real-JPEG server, the detection
+// recorder fetches from the discovered URL and stores a thumbnail row.
+// ============================================================
+static void test_snapshot_url_discovered_override(const std::string& ubv_dir) {
+  auto jpeg = load_file(source_dir() + "testdata/snapshot_108.jpg");
+
+  // emu_events: ONVIF camera (serves events) + empty-body snapshot (Protect URL)
+  SnapshotSyntheticEmulator emu_events("192.168.1.252",
+    {make_field_detector_response("Human", true,  "2026-01-01T00:00:00Z"),
+     make_field_detector_response("Human", false, "2026-01-01T00:00:02Z")},
+    {});  // empty JPEG → fetch returns empty → no thumbnail if this URL is used
+  emu_events.start();
+
+  // emu_snap: separate server with real JPEG; no ONVIF events.
+  // OnSnapshotUrlDiscovered points the recorder here.
+  SnapshotSyntheticEmulator emu_snap("192.168.1.253",
+    {}, jpeg);
+  emu_snap.start();
+
+  auto backend = std::make_unique<MockBackend>();
+  MockBackend* bptr = backend.get();
+  auto rec_or = onvif::DetectionRecorder::CreateWithBackend(std::move(backend));
+  if (!rec_or.ok()) {
+    CHECK(false, "snapshot_url_discovered_override: CreateWithBackend failed");
+    return;
+  }
+  onvif::DetectionRecorder& recorder = **rec_or;
+  recorder.set_ubv_dir(ubv_dir);
+
+  // cfg.snapshot_url = emu_events (empty JPEG); without discovery no thumbnail.
+  onvif::CameraConfig cfg;
+  cfg.ip                 = emu_events.local_address();
+  cfg.user               = "admin";
+  cfg.password           = "test";
+  cfg.snapshot_url       = emu_events.snapshot_url();
+  cfg.retry_interval_sec = 1;
+  recorder.set_snapshot(cfg);
+
+  // Override snapshot URL via ONVIF discovery → real JPEG server.
+  recorder.OnSnapshotUrlDiscovered(cfg.ip, emu_snap.snapshot_url());
+
+  bool ok = run_single_camera(emu_events, recorder, 2);
+  CHECK(ok, "snapshot_url_discovered_override: timed out waiting for events");
+
+  // A thumbnail row must have been written, proving the discovered URL was used
+  // (the Protect-stored emu_events snapshot returns empty bytes → no thumb).
+  CHECK(!bptr->thumbs.empty(),
+        "snapshot_url_discovered_override: expected thumbnail written via "
+        "discovered URL, got none (discovered URL not used?)");
+  CHECK(bptr->events.size() == 1,
+        "snapshot_url_discovered_override: expected 1 detection event, got: " +
+        std::to_string(bptr->events.size()));
+}
+
 int main() {
   const std::string ubv_dir = "/tmp/test_dr_thumbs";
 
@@ -2738,6 +2798,8 @@ int main() {
            [] { test_version_gate_legacy_path_unchanged(); });
   run_test("version_gate_rich_path_on_7_1",
            [] { test_version_gate_rich_path_on_7_1(); });
+  run_test("snapshot_url_discovered_override",
+           [&] { test_snapshot_url_discovered_override(ubv_dir); });
 
   onvif::global_cleanup();
 
