@@ -604,13 +604,16 @@ static void test_hot_add(const std::string& jsonl) {
 // Helpers shared by snapshot-discovery tests
 // ============================================================
 
-// Run a listener with a SnapshotUrlCallback and collect events.
-// Returns the collected events, timeout status, and the last discovered URL.
+// Run a listener with SnapshotUrlCallback + ResolutionCallback and collect
+// events.  Returns events, timeout status, the last discovered URL, and the
+// last discovered resolution.
 struct SnapshotDiscoveryResult {
   std::vector<onvif::OnvifEvent> events;
   bool        timed_out{false};
   std::string discovered_url;
   std::string discovered_ip;
+  int         discovered_width{0};
+  int         discovered_height{0};
 };
 
 static SnapshotDiscoveryResult collect_with_snapshot_callback(
@@ -623,6 +626,7 @@ static SnapshotDiscoveryResult collect_with_snapshot_callback(
 
   std::mutex cb_mu;
   std::string disc_url, disc_ip;
+  int disc_w{0}, disc_h{0};
 
   onvif::OnvifListener listener;
   listener.add_camera(cfg);
@@ -631,6 +635,12 @@ static SnapshotDiscoveryResult collect_with_snapshot_callback(
         std::lock_guard<std::mutex> lk(cb_mu);
         disc_ip  = ip;
         disc_url = url;
+      });
+  listener.set_resolution_callback(
+      [&](const std::string& /*ip*/, int w, int h) {
+        std::lock_guard<std::mutex> lk(cb_mu);
+        disc_w = w;
+        disc_h = h;
       });
 
   std::thread t([&] {
@@ -657,10 +667,69 @@ static SnapshotDiscoveryResult collect_with_snapshot_callback(
   r.timed_out = !ok;
   {
     std::lock_guard<std::mutex> lk(cb_mu);
-    r.discovered_url = disc_url;
-    r.discovered_ip  = disc_ip;
+    r.discovered_url    = disc_url;
+    r.discovered_ip     = disc_ip;
+    r.discovered_width  = disc_w;
+    r.discovered_height = disc_h;
   }
   return r;
+}
+
+// ============================================================
+// Test: resolution discovery -- auto profile (MainStream = 3840x2160)
+//
+// MediaServiceEmulator's GetProfiles now embeds VideoEncoderConfiguration
+// with Resolution.  With auto-discovery the listener should select
+// MainStream and fire ResolutionCallback with 3840x2160.
+// ============================================================
+static void test_resolution_discovery_auto() {
+  MediaServiceEmulator emu;
+  emu.start();
+
+  onvif::CameraConfig cfg;
+  cfg.ip                 = emu.local_address();
+  cfg.user               = "admin";
+  cfg.password           = "test";
+  cfg.retry_interval_sec = 1;
+  // No explicit snapshot_profile → auto-selects MainStream (3840x2160)
+
+  auto r = collect_with_snapshot_callback(cfg, 2, std::chrono::seconds(30));
+
+  CHECK(!r.timed_out, "resolution_auto: timed out");
+  CHECK(r.discovered_width  == 3840,
+        "resolution_auto: expected width=3840, got: " +
+        std::to_string(r.discovered_width));
+  CHECK(r.discovered_height == 2160,
+        "resolution_auto: expected height=2160, got: " +
+        std::to_string(r.discovered_height));
+}
+
+// ============================================================
+// Test: resolution discovery -- explicit SubStream (640x480)
+//
+// Pinning snapshot_profile="SubStream" causes the listener to select that
+// profile, which has a 640x480 encoder configuration in the emulator.
+// ============================================================
+static void test_resolution_discovery_explicit() {
+  MediaServiceEmulator emu;
+  emu.start();
+
+  onvif::CameraConfig cfg;
+  cfg.ip                 = emu.local_address();
+  cfg.user               = "admin";
+  cfg.password           = "test";
+  cfg.retry_interval_sec = 1;
+  cfg.snapshot_profile   = "SubStream";  // 640x480
+
+  auto r = collect_with_snapshot_callback(cfg, 2, std::chrono::seconds(30));
+
+  CHECK(!r.timed_out, "resolution_explicit: timed out");
+  CHECK(r.discovered_width  == 640,
+        "resolution_explicit: expected width=640, got: " +
+        std::to_string(r.discovered_width));
+  CHECK(r.discovered_height == 480,
+        "resolution_explicit: expected height=480, got: " +
+        std::to_string(r.discovered_height));
 }
 
 // ============================================================
@@ -846,6 +915,10 @@ int main(int argc, char* argv[]) {
            [] { test_snapshot_discovery_explicit_profile(); });
   run_test("snapshot_discovery_no_media_service",
            [] { test_snapshot_discovery_no_media_service(); });
+  run_test("resolution_discovery_auto",
+           [] { test_resolution_discovery_auto(); });
+  run_test("resolution_discovery_explicit",
+           [] { test_resolution_discovery_explicit(); });
 
   onvif::global_cleanup();
 

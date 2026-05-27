@@ -439,8 +439,10 @@ class CameraWorker {
   CameraWorker(const CameraConfig& cfg,
                const EventCallback& cb,
                const std::atomic<bool>& running,
-               const SnapshotUrlCallback& snap_cb = {})
-    : cfg_(cfg), cb_(cb), running_(running), snapshot_url_cb_(snap_cb) {}
+               const SnapshotUrlCallback& snap_cb = {},
+               const ResolutionCallback&  res_cb  = {})
+    : cfg_(cfg), cb_(cb), running_(running),
+      snapshot_url_cb_(snap_cb), resolution_cb_(res_cb) {}
 
   void run() {
     LOG(INFO) << '[' << cfg_.ip << "] started";
@@ -454,19 +456,32 @@ class CameraWorker {
       // Re-runs on every outer loop iteration so a camera restart is handled cleanly.
       const DiscoveredServices sv = discover_services();
 
-      // Discover the per-profile snapshot URI via the ONVIF Media service and
-      // notify the caller so it can override the Protect-stored snapshot URL.
-      // Runs on every (re)connect so the URL stays current after a camera
-      // restart.  Failures are soft: the Protect URL is used as fallback.
-      if (!sv.media_url.empty() && snapshot_url_cb_) {
-        const std::string snap_uri =
-            discover_snapshot_url(sv.media_url, cfg_.snapshot_profile);
-        if (!snap_uri.empty()) {
-          snapshot_url_cb_(cfg_.ip, snap_uri);
-        } else if (!cfg_.snapshot_profile.empty()) {
-          LOG(WARNING) << '[' << cfg_.ip << "] profile '"
-                       << cfg_.snapshot_profile
-                       << "' produced no snapshot URI -- using Protect's URL";
+      // Discover the per-profile snapshot URI and sensor resolution via the
+      // ONVIF Media service.  Runs on every (re)connect so values stay current
+      // after a camera restart.  All failures are soft: the Protect-stored URL
+      // and the 1920x1080 default are used as fallbacks.
+      if (!sv.media_url.empty()) {
+        // discover_profile_info() calls GetProfiles once to get the profile
+        // token AND the VideoEncoderConfiguration/Resolution in one exchange.
+        const ProfileInfo pinfo =
+            discover_profile_info(sv.media_url, cfg_.snapshot_profile);
+        if (!pinfo.token.empty()) {
+          // Fire snapshot URL callback.
+          if (snapshot_url_cb_) {
+            const std::string snap_uri =
+                discover_snapshot_url(sv.media_url, pinfo.token);
+            if (!snap_uri.empty()) {
+              snapshot_url_cb_(cfg_.ip, snap_uri);
+            } else if (!cfg_.snapshot_profile.empty()) {
+              LOG(WARNING) << '[' << cfg_.ip << "] profile '"
+                           << cfg_.snapshot_profile
+                           << "' produced no snapshot URI -- using Protect's URL";
+            }
+          }
+          // Fire resolution callback when the profile carries encoder config.
+          if (resolution_cb_ && pinfo.width > 0 && pinfo.height > 0) {
+            resolution_cb_(cfg_.ip, pinfo.width, pinfo.height);
+          }
         }
       }
 
@@ -962,9 +977,24 @@ class CameraWorker {
     return out;
   }
 
-  // Calls GetProfiles on the ONVIF Media service and returns the token
-  // attribute of the first profile.  Returns empty on any failure.
-  std::string discover_first_profile(const std::string& media_url) {
+  // Result of a GetProfiles query: resolved profile token plus the
+  // VideoEncoderConfiguration resolution (0x0 when not in the response).
+  struct ProfileInfo {
+    std::string token;    // resolved ONVIF profile token
+    int         width{0};
+    int         height{0};
+  };
+
+  // Calls GetProfiles on the ONVIF Media service.
+  // Selects @p preferred_token when non-empty (falls back to first profile
+  // with a warning if the token is not found), otherwise selects the first
+  // available profile.
+  // Also extracts VideoEncoderConfiguration/Resolution from the selected
+  // profile so the caller can update the per-camera resolution in a single
+  // SOAP exchange without a separate GetVideoEncoderConfiguration call.
+  // Returns a zero-token ProfileInfo on any failure.
+  ProfileInfo discover_profile_info(const std::string& media_url,
+                                     const std::string& preferred_token) {
     static const char* ACTION =
         "http://www.onvif.org/ver10/media/wsdl/GetProfiles";
     const std::string body = "    <trt:GetProfiles/>\n";
@@ -976,7 +1006,7 @@ class CameraWorker {
                 << (resp_or.ok()
                         ? "HTTP " + std::to_string(resp_or->status_code)
                         : resp_or.status().message())
-                << ") -- no profile token";
+                << ") -- no profile info";
       return {};
     }
 
@@ -986,40 +1016,81 @@ class CameraWorker {
       return {};
     }
 
-    // Get the token attribute of the first Profiles element.
     auto profiles = doc_or->xpath("//*[local-name()='Profiles']");
     if (!profiles || !profiles->nodesetval ||
         profiles->nodesetval->nodeNr == 0) {
       LOG(INFO) << '[' << cfg_.ip << "] GetProfiles: no profiles returned";
       return {};
     }
-    xmlNodePtr first = profiles->nodesetval->nodeTab[0];
-    xmlChar* tok = xmlGetProp(first, BAD_CAST "token");
+
+    // Select the profile: prefer @p preferred_token; fall back to first.
+    xmlNodePtr selected = nullptr;
+    if (preferred_token.empty()) {
+      selected = profiles->nodesetval->nodeTab[0];
+    } else {
+      for (int i = 0; i < profiles->nodesetval->nodeNr; ++i) {
+        xmlNodePtr node = profiles->nodesetval->nodeTab[i];
+        xmlChar* t = xmlGetProp(node, BAD_CAST "token");
+        if (t) {
+          bool match =
+              std::string(reinterpret_cast<char*>(t)) == preferred_token;
+          xmlFree(t);
+          if (match) { selected = node; break; }
+        }
+      }
+      if (!selected) {
+        LOG(WARNING) << '[' << cfg_.ip << "] profile '" << preferred_token
+                     << "' not found in GetProfiles -- using first profile";
+        selected = profiles->nodesetval->nodeTab[0];
+      }
+    }
+
+    // Extract profile token.
+    xmlChar* tok = xmlGetProp(selected, BAD_CAST "token");
     if (!tok) {
-      LOG(INFO) << '[' << cfg_.ip << "] GetProfiles: first profile has no token";
+      LOG(INFO) << '[' << cfg_.ip << "] selected profile has no token";
       return {};
     }
-    std::string token(reinterpret_cast<char*>(tok));
+    ProfileInfo info;
+    info.token = reinterpret_cast<char*>(tok);
     xmlFree(tok);
-    LOG(INFO) << '[' << cfg_.ip << "] auto-selected profile: " << token;
-    return token;
+    LOG(INFO) << '[' << cfg_.ip << "] selected profile: " << info.token;
+
+    // Extract VideoEncoderConfiguration/Resolution when present.
+    // Many cameras embed the encoder config inside the Profiles element;
+    // we can therefore learn the sensor resolution without an extra
+    // GetVideoEncoderConfiguration round-trip.
+    const std::string w_str = XmlDoc::trim(doc_or->text(
+        ".//*[local-name()='VideoEncoderConfiguration']"
+        "/*[local-name()='Resolution']/*[local-name()='Width']", selected));
+    const std::string h_str = XmlDoc::trim(doc_or->text(
+        ".//*[local-name()='VideoEncoderConfiguration']"
+        "/*[local-name()='Resolution']/*[local-name()='Height']", selected));
+    if (!w_str.empty() && !h_str.empty()) {
+      int w = std::atoi(w_str.c_str());
+      int h = std::atoi(h_str.c_str());
+      if (w > 0 && h > 0) {
+        info.width  = w;
+        info.height = h;
+        LOG(INFO) << '[' << cfg_.ip << "] discovered resolution: "
+                  << w << 'x' << h
+                  << " (profile=" << info.token << ")";
+      }
+    }
+    return info;
   }
 
-  // Calls GetSnapshotUri for @p profile_token on the ONVIF Media service
-  // at @p media_url.  If @p profile_token is empty, auto-discovers the
-  // first available profile via GetProfiles first.
+  // Calls GetSnapshotUri for the given (already-resolved) @p profile_token
+  // on the ONVIF Media service at @p media_url.
   // Returns the URI string, or empty on any failure.
+  // profile_token must be non-empty; call discover_profile_info() first.
   std::string discover_snapshot_url(const std::string& media_url,
                                      const std::string& profile_token) {
     static const char* ACTION =
         "http://www.onvif.org/ver10/media/wsdl/GetSnapshotUri";
 
-    // Resolve profile token: use the configured one or discover the first.
-    std::string token = profile_token;
-    if (token.empty()) {
-      token = discover_first_profile(media_url);
-      if (token.empty()) return {};
-    }
+    if (profile_token.empty()) return {};
+    const std::string token = profile_token;
 
     const std::string body =
         "    <trt:GetSnapshotUri>\n"
@@ -1057,6 +1128,7 @@ class CameraWorker {
   const EventCallback&      cb_;
   const std::atomic<bool>&  running_;
   const SnapshotUrlCallback snapshot_url_cb_;  // optional; may be empty
+  const ResolutionCallback  resolution_cb_;    // optional; may be empty
 };
 
 }  // anonymous namespace
@@ -1087,6 +1159,10 @@ void OnvifListener::set_snapshot_url_callback(SnapshotUrlCallback cb) {
   snapshot_url_cb_ = std::move(cb);
 }
 
+void OnvifListener::set_resolution_callback(ResolutionCallback cb) {
+  resolution_cb_ = std::move(cb);
+}
+
 void OnvifListener::run(EventCallback cb) {
   running_ = true;
 
@@ -1095,7 +1171,8 @@ void OnvifListener::run(EventCallback cb) {
   workers.reserve(cameras_.size());
   for (const auto& cam : cameras_)
     workers.push_back(
-      std::make_unique<CameraWorker>(cam, cb, running_, snapshot_url_cb_));
+      std::make_unique<CameraWorker>(
+          cam, cb, running_, snapshot_url_cb_, resolution_cb_));
 
   // Launch one thread per camera
   std::vector<std::thread> threads;
@@ -1122,7 +1199,8 @@ void OnvifListener::run(EventCallback cb) {
       for (auto& cfg : hot_adds) {
         cameras_.push_back(cfg);
         workers.push_back(
-            std::make_unique<CameraWorker>(cfg, cb, running_, snapshot_url_cb_));
+            std::make_unique<CameraWorker>(
+                cfg, cb, running_, snapshot_url_cb_, resolution_cb_));
         CameraWorker* ptr = workers.back().get();
         threads.emplace_back([ptr] { ptr->run(); });
       }

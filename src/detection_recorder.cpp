@@ -1521,20 +1521,24 @@ void DetectionRecorder::on_event(const OnvifEvent& ev) {
       ein.thumbnail_id      = thumb_id;
       ein.start_ms          = ts_ms;
       ein.end_ms            = ts_ms;
-      // Use the per-camera resolution from set_camera_resolution() when
-      // available (populated from --camera_resolutions at startup), falling
-      // back to 1920x1080.  The 1080p default is a better common denominator
-      // than the previous QHD hardcode (most cameras are 1080p or smaller).
-      // TODO: auto-discover via ONVIF GetVideoEncoderConfiguration when no
-      // explicit override is provided so bbox grid accuracy is always correct.
+      // Resolution priority for the bbox grid (Protect 7.1+ UI overlay):
+      //   1. --camera_resolutions explicit override (camera_image_sizes_)
+      //   2. ONVIF-discovered via GetProfiles/VideoEncoderConfiguration
+      //   3. 1920x1080 fallback
       {
-        auto it_res = camera_image_sizes_.find(ev.camera_ip);
-        if (it_res != camera_image_sizes_.end()) {
-          ein.image_width  = it_res->second.first;
-          ein.image_height = it_res->second.second;
+        auto it_exp = camera_image_sizes_.find(ev.camera_ip);
+        if (it_exp != camera_image_sizes_.end()) {
+          ein.image_width  = it_exp->second.first;
+          ein.image_height = it_exp->second.second;
         } else {
-          ein.image_width  = 1920;
-          ein.image_height = 1080;
+          auto it_disc = discovered_resolutions_.find(ev.camera_ip);
+          if (it_disc != discovered_resolutions_.end()) {
+            ein.image_width  = it_disc->second.first;
+            ein.image_height = it_disc->second.second;
+          } else {
+            ein.image_width  = 1920;
+            ein.image_height = 1080;
+          }
         }
       }
       ein.object_ids        = {sdo_id};
@@ -1758,6 +1762,22 @@ void DetectionRecorder::OnSnapshotUrlDiscovered(
   discovered_snapshot_urls_[camera_ip] = snapshot_url;
   LOG(INFO) << '[' << camera_ip << "] snapshot URL updated via ONVIF discovery: "
             << snapshot_url;
+}
+
+void DetectionRecorder::OnResolutionDiscovered(
+    const std::string& camera_ip, int width, int height) {
+  if (width <= 0 || height <= 0) return;
+  // Only store when no explicit --camera_resolutions override is set.
+  // The explicit override always wins; don't silently clobber it.
+  if (camera_image_sizes_.count(camera_ip)) {
+    LOG(INFO) << '[' << camera_ip << "] resolution discovery ignored "
+              << "(explicit --camera_resolutions override is set)";
+    return;
+  }
+  absl::MutexLock lk(&mu_);
+  discovered_resolutions_[camera_ip] = {width, height};
+  LOG(INFO) << '[' << camera_ip << "] resolution updated via ONVIF discovery: "
+            << width << 'x' << height;
 }
 
 void DetectionRecorder::set_camera_resolution(const std::string& ip,

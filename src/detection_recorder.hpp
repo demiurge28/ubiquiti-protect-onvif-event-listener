@@ -189,6 +189,14 @@ class DetectionRecorder {
   void OnSnapshotUrlDiscovered(const std::string& camera_ip,
                                const std::string& snapshot_url);
 
+  /// Called (from an ONVIF listener camera thread) when GetProfiles returns
+  /// a VideoEncoderConfiguration/Resolution for @p camera_ip.  Overrides
+  /// the 1920x1080 default but defers to any explicit --camera_resolutions
+  /// entry.  Thread-safe; may be called at any time, including during
+  /// on_event().
+  void OnResolutionDiscovered(const std::string& camera_ip,
+                              int width, int height);
+
   /// Set the pixel resolution for a specific camera.
   /// Used when computing the smartDetectObjectAreas bounding-box grid on
   /// Protect 7.1+.  When not set, 1920×1080 is assumed as the fallback.
@@ -564,8 +572,15 @@ class DetectionRecorder {
   // Per-camera pixel resolution {width, height} for smartDetectObjectAreas
   // bounding-box grid computation on Protect 7.1+.
   // Written before run() via set_camera_resolution(); read-only after that.
-  // Absent entries fall back to 1920×1080 (safer default than QHD).
+  // Absent entries fall back to discovered_resolutions_ then 1920×1080.
   std::map<std::string, std::pair<int, int>> camera_image_sizes_;
+
+  // Per-camera resolutions discovered at runtime via ONVIF GetProfiles
+  // VideoEncoderConfiguration/Resolution.  Written from camera worker threads
+  // via OnResolutionDiscovered() (under mu_); read in on_event() under the
+  // same lock.  Overrides the 1920×1080 default but defers to the explicit
+  // --camera_resolutions entries in camera_image_sizes_.
+  std::map<std::string, std::pair<int, int>> discovered_resolutions_;
 
   // Coalescing: last completed event per (camera_ip, detection_type).
   // real_end_ms is the wall-clock time (ms) when the detection ended, without
