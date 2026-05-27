@@ -149,6 +149,14 @@ using SnapshotUrlCallback =
     std::function<void(const std::string& camera_ip,
                        const std::string& snapshot_url)>;
 
+// Called from a camera worker thread (once per reconnect) when the ONVIF
+// Media service GetProfiles response includes a VideoEncoderConfiguration
+// with a Resolution element for the selected profile.  The implementor
+// should update its per-camera resolution for @p camera_ip.  Must be
+// thread-safe.  Not called when the response has no Resolution data.
+using ResolutionCallback =
+    std::function<void(const std::string& camera_ip, int width, int height)>;
+
 // ---------------------------------------------------------------
 // Library lifecycle -- call once from main() around all listeners
 // ---------------------------------------------------------------
@@ -209,6 +217,13 @@ class OnvifListener {
     /// thread-safe.  Must be called before run().
     void set_snapshot_url_callback(SnapshotUrlCallback cb);
 
+    /// Register a callback invoked once per camera (on each reconnect)
+    /// when the ONVIF Media service GetProfiles response includes a
+    /// VideoEncoderConfiguration/Resolution for the selected profile.  The
+    /// callback is called from the camera's worker thread and must be
+    /// thread-safe.  Must be called before run().
+    void set_resolution_callback(ResolutionCallback cb);
+
     /// Spawn one thread per camera. Invoke cb for every received event
     /// (from the camera's own thread -- cb must be thread-safe).
     /// Blocks until stop() is called and all threads have exited (or a
@@ -225,6 +240,7 @@ class OnvifListener {
     std::atomic<bool>         running_{false};
     std::vector<CameraConfig> cameras_;
     SnapshotUrlCallback       snapshot_url_cb_;  // optional; set before run()
+    ResolutionCallback        resolution_cb_;    // optional; set before run()
 
     // Queue of cameras added via add_camera_live() after run() started.
     // Drained by run()'s supervisor loop under pending_mutex_.

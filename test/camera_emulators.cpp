@@ -662,7 +662,10 @@ std::pair<int, std::string> MediaServiceEmulator::handle(
     return {200, rewrite_urls(resp)};
   }
 
-  // ---- GetProfiles: two profiles ----
+  // ---- GetProfiles: two profiles with VideoEncoderConfiguration/Resolution ----
+  // MainStream: 3840x2160 (4K), SubStream: 640x480.
+  // Resolution is embedded in the Profiles element so the recorder can
+  // extract it in a single GetProfiles call without GetVideoEncoderConfiguration.
   if (tail == "GetProfiles") {
     std::string resp =
       "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
@@ -674,9 +677,21 @@ std::pair<int, std::string> MediaServiceEmulator::handle(
       "<trt:GetProfilesResponse>"
       "<trt:Profiles token=\"MainStream\">"
       "<tt:Name>Main Stream</tt:Name>"
+      "<tt:VideoEncoderConfiguration token=\"MainStream_venc\">"
+      "<tt:Resolution>"
+      "<tt:Width>3840</tt:Width>"
+      "<tt:Height>2160</tt:Height>"
+      "</tt:Resolution>"
+      "</tt:VideoEncoderConfiguration>"
       "</trt:Profiles>"
       "<trt:Profiles token=\"SubStream\">"
       "<tt:Name>Sub Stream</tt:Name>"
+      "<tt:VideoEncoderConfiguration token=\"SubStream_venc\">"
+      "<tt:Resolution>"
+      "<tt:Width>640</tt:Width>"
+      "<tt:Height>480</tt:Height>"
+      "</tt:Resolution>"
+      "</tt:VideoEncoderConfiguration>"
       "</trt:Profiles>"
       "</trt:GetProfilesResponse>"
       "</SOAP-ENV:Body>"

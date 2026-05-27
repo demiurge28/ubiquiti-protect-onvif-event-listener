@@ -797,6 +797,15 @@ int main(int argc, char* argv[]) {
         det_rec.OnSnapshotUrlDiscovered(ip, url);
       });
 
+  // Wire OnvifListener -> DetectionRecorder: when a camera worker discovers
+  // a resolution via ONVIF GetProfiles/VideoEncoderConfiguration, update the
+  // recorder so the Protect 7.1+ bbox grid is correctly aligned.  The explicit
+  // --camera_resolutions override still takes highest priority.
+  listener.set_resolution_callback(
+      [&det_rec](const std::string& ip, int w, int h) {
+        det_rec.OnResolutionDiscovered(ip, w, h);
+      });
+
   if (!thumbs_dir.empty())
     det_rec.set_ubv_dir(thumbs_dir);
 

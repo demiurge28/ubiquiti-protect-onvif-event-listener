@@ -2746,6 +2746,62 @@ static void test_snapshot_url_discovered_override(const std::string& ubv_dir) {
         std::to_string(bptr->events.size()));
 }
 
+// ============================================================
+// Test: OnResolutionDiscovered() is used by the rich-path bbox grid.
+//
+// Calls OnResolutionDiscovered(ip, 4096, 2160) before events arrive,
+// then triggers a rich-path detection (Protect 7.1+ version gate) and
+// verifies that the SDA bbox was computed with 4096x2160 rather than
+// the 1920x1080 default.
+// ============================================================
+static void test_resolution_discovered_used() {
+  // Force Protect 7.1+ path so insert_smart_detect_object_area is called.
+  onvif::protect_version::ResetForTesting();
+  onvif::protect_version::SetCurrent({7, 1, 47});
+
+  auto backend = std::make_unique<MockBackend>();
+  MockBackend* bptr = backend.get();
+  auto rec_or = onvif::DetectionRecorder::CreateWithBackend(std::move(backend));
+  if (!rec_or.ok()) {
+    CHECK(false, "resolution_discovered_used: CreateWithBackend failed");
+    onvif::protect_version::ResetForTesting();
+    return;
+  }
+  onvif::DetectionRecorder& recorder = **rec_or;
+
+  const std::string cam_ip = "192.168.1.260";
+
+  // Announce a 4K resolution via ONVIF discovery (no explicit override set).
+  recorder.OnResolutionDiscovered(cam_ip, 4096, 2160);
+
+  // Fire a detection event.
+  onvif::OnvifEvent ev;
+  ev.camera_ip   = cam_ip;
+  ev.topic       = "tns1:RuleEngine/FieldDetector/ObjectsInside";
+  ev.event_time  = "2026-01-01T00:00:00Z";
+  ev.property_op = "Changed";
+  ev.source["Rule"]   = "Human";
+  ev.data["IsInside"] = "true";
+  recorder.on_event(ev);
+
+  CHECK(bptr->sdas.size() == 1,
+        "resolution_discovered_used: expected 1 SDA row, got "
+        + std::to_string(bptr->sdas.size()));
+
+  // The bbox grid for 4096x2160 differs from 1920x1080.  The PlaceholderBbox
+  // function uses image dimensions to position the box, so x2 must be
+  // proportionally larger than for 1920x1080.
+  if (!bptr->sdas.empty()) {
+    // x2 for a 4096-wide frame must be > x2 for a 1920-wide frame.
+    // For 1920x1080 the full-grid x2 = 1920; for 4096x2160 x2 = 4096.
+    CHECK(bptr->sdas[0].x2 > 1920,
+          "resolution_discovered_used: x2 should be >1920 for 4096-wide frame, got: "
+          + std::to_string(bptr->sdas[0].x2));
+  }
+
+  onvif::protect_version::ResetForTesting();
+}
+
 int main() {
   const std::string ubv_dir = "/tmp/test_dr_thumbs";
 
@@ -2800,6 +2856,8 @@ int main() {
            [] { test_version_gate_rich_path_on_7_1(); });
   run_test("snapshot_url_discovered_override",
            [&] { test_snapshot_url_discovered_override(ubv_dir); });
+  run_test("resolution_discovered_used",
+           [] { test_resolution_discovered_used(); });
 
   onvif::global_cleanup();
 
