@@ -31,6 +31,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Diagnostic dump tarball race** (`admin_server.cpp`): the
+  `/api/diagnostic_dump` handler passed a hardcoded `/tmp/onvif-dump.tar.gz`
+  path to `build_diagnostic_dump()`, so two concurrent dump requests from
+  the admin UI would overwrite each other's output. The tarball path is now
+  derived from the unique temp directory created by `mkdtemp()` (e.g.
+  `/tmp/onvif-dump.ABC123.tar.gz`), making each request fully independent.
+  `build_diagnostic_dump()` return type changed from `absl::Status` to
+  `absl::StatusOr<std::string>` to surface the path to the caller.
+
 ### Removed
 
 ### Dependencies

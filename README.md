@@ -42,6 +42,14 @@ This fork adds automatic per-profile snapshot URL discovery:
 See [FLAGS.md § Per-profile snapshot selection](FLAGS.md#per-profile-snapshot-selection)
 for the full reference, vendor token examples, and limitations.
 
+### Bug fixes
+
+- **Diagnostic dump tarball race** — the admin UI's *Download diagnostic dump*
+  button previously wrote all concurrent requests to the same
+  `/tmp/onvif-dump.tar.gz`, corrupting output when two sessions triggered a
+  dump simultaneously. Each request now uses a unique path derived from its
+  own `mkdtemp()` working directory.
+
 ### Build improvements
 
 **ARM64 native test config** (`--config=arm64_native`) — enables the full
