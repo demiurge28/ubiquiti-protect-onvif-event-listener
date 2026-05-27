@@ -27,6 +27,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `xmlns:trt` (`http://www.onvif.org/ver10/media/wsdl`) namespace added to every
     SOAP envelope and XPath registry for Media service call support.
 
+- **Automatic camera resolution discovery**: the `GetProfiles` response already
+  called for snapshot profile selection also carries each profile's
+  `VideoEncoderConfiguration/Resolution`. The recorder now extracts width×height
+  from the selected profile in the same SOAP exchange — no additional round-trip.
+  Discovered resolutions feed the Protect 7.1+ `smartDetectObjectAreas` bbox grid
+  so the detection overlay aligns correctly on 4K and non-1080p cameras without
+  manual `--camera_resolutions` entries.
+  - Resolution priority: `--camera_resolutions` explicit override >
+    ONVIF-discovered > 1920×1080 fallback. Explicit overrides are never clobbered.
+  - `ResolutionCallback` type and `OnvifListener::set_resolution_callback()` for
+    decoupled delivery to `DetectionRecorder`.
+  - `DetectionRecorder::OnResolutionDiscovered()`: thread-safe in-memory update;
+    `discovered_resolutions_` map slots between `camera_image_sizes_` and the
+    1920×1080 default in the Protect 7.1+ enrichment path.
+
 ### Changed
 
 ### Fixed

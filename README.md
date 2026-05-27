@@ -16,28 +16,38 @@ AI** (e.g. G3 Instant). See [First-party camera support](#first-party-camera-sup
 This fork extends the original [danielwoz/ubiquiti-protect-onvif-event-listener](https://github.com/danielwoz/ubiquiti-protect-onvif-event-listener)
 with the following improvements.
 
-### Per-profile ONVIF snapshot selection
+### Per-profile ONVIF snapshot selection and resolution discovery
 
 Multi-channel cameras — fisheye models, PTZ cameras with e-PTZ channels, and
 multi-sensor units — expose multiple **ONVIF media profiles**, each with its own
-snapshot endpoint. UniFi Protect typically stores the URL for only one profile,
-which is often wrong for these cameras.
+snapshot endpoint and sensor resolution. UniFi Protect typically stores only
+one profile's URL and defaults to 1920×1080 for all cameras.
 
-This fork adds automatic per-profile snapshot URL discovery:
+This fork adds automatic per-profile discovery in a **single `GetProfiles` SOAP
+exchange** per (re)connect:
 
-- On each camera (re)connect, `GetServices` is called to detect the ONVIF
-  Media service, `GetProfiles` auto-discovers the first available profile token,
-  and `GetSnapshotUri(ProfileToken)` retrieves the per-channel snapshot URL.
-- The discovered URL overrides the Protect-stored URL for all subsequent
-  snapshot fetches — without touching the database.
+- `GetServices` detects the ONVIF Media service.
+- `GetProfiles` returns all available profile tokens plus each profile's
+  embedded `VideoEncoderConfiguration/Resolution`.
+- `GetSnapshotUri(ProfileToken)` retrieves the per-channel snapshot URL for the
+  selected profile.
+- The discovered URL **and** resolution override the Protect-stored values for
+  all subsequent thumbnail fetches and bbox grid computations — without touching
+  the database.
 - A new `--camera_snapshot_profiles` flag (and admin UI **Cameras** card entry)
-  lets you pin a specific profile token per camera, bypassing auto-discovery.
-- Failures at any step fall back silently to the Protect-stored URL.
+  lets you pin a specific profile token per camera.
+- Failures at any step fall back silently to the Protect-stored URL and the
+  1920×1080 default.
 
-**Priority order** (highest wins):
+**Snapshot URL priority** (highest wins):
 1. `--camera_snapshot_urls` explicit path override
 2. ONVIF-discovered URL from `GetSnapshotUri`
 3. Protect-stored `thirdPartyCameraInfo.snapshotUrl`
+
+**Resolution priority** (highest wins):
+1. `--camera_resolutions` explicit override
+2. ONVIF-discovered from `GetProfiles` VideoEncoderConfiguration
+3. 1920×1080 fallback
 
 See [FLAGS.md § Per-profile snapshot selection](FLAGS.md#per-profile-snapshot-selection)
 for the full reference, vendor token examples, and limitations.
