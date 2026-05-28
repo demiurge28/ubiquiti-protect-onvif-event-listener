@@ -332,6 +332,19 @@ cc_library(
 )
 
 cc_library(
+    name = "webhook_notifier",
+    srcs = ["src/webhook_notifier.cpp"],
+    hdrs = ["src/webhook_notifier.hpp"],
+    strip_include_prefix = "src",
+    deps = [
+        ":util",
+        "@com_google_absl//absl/log:log",
+        "@com_google_absl//absl/synchronization:synchronization",
+    ] + _CURL,
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "detection_recorder",
     srcs = ["src/detection_recorder.cpp"],
     hdrs = ["src/detection_recorder.hpp"],
@@ -347,6 +360,7 @@ cc_library(
         ":protect_version",
         ":ubv_thumbnail",
         ":util",
+        ":webhook_notifier",
         "@com_google_absl//absl/log:log",
         "@com_google_absl//absl/status:status",
         "@com_google_absl//absl/status:statusor",
@@ -486,6 +500,7 @@ cc_binary(
     deps = [":tcmalloc_force_link"] + _PQ + [
         ":admin_server",
         ":alarm_notifier",
+        ":webhook_notifier",
         ":camera_change_log",
         ":cameras_change_listener",
         ":contention_profiler",

@@ -131,6 +131,18 @@ const std::vector<Entry>& Schema() {
      "(only useful when the camera has a certificate signed by a CA that the "
      "recorder host trusts).",
      "Cameras"},
+    {"webhook_url", Type::String,
+     "HTTP/HTTPS URL to POST a JSON detection payload to on every new smart "
+     "detection event.  Empty (default) disables the webhook.  Self-signed TLS "
+     "certificates are accepted by default; enable webhook_tls_verify to enforce "
+     "CA-chain validation.  Payload fields: event, type, camera_ip, camera_name, "
+     "event_id, timestamp_ms, timestamp.",
+     "Cameras"},
+    {"webhook_tls_verify", Type::Bool,
+     "When false (default), HTTPS webhook endpoints accept self-signed "
+     "certificates.  Set to true to enforce strict CA-chain validation "
+     "(only needed when the webhook server has a CA-signed certificate).",
+     "Cameras"},
 
     // ---- MSR forwarding ----
     {"msr_url", Type::String,

@@ -51,6 +51,7 @@
 #include "absl/status/statusor.h"
 #include "absl/log/log_sink_registry.h"
 #include "alarm_notifier.hpp"
+#include "webhook_notifier.hpp"
 #include "contention_profiler.hpp"
 #include "cpu_profiler.hpp"
 #include "msr_backfill.hpp"
@@ -228,6 +229,16 @@ ABSL_FLAG(bool, snapshot_tls_verify, false,
     "to enforce strict CA-chain validation of the camera's TLS certificate — "
     "only useful when the camera has a certificate signed by a CA that the "
     "recorder host trusts.");
+ABSL_FLAG(std::string, webhook_url, "",
+    "HTTP/HTTPS URL to POST a JSON detection event payload to on every new "
+    "smart detection event.  Empty (the default) disables the webhook.  "
+    "Payload fields: event, type, camera_ip, camera_name, event_id, "
+    "timestamp_ms, timestamp.  Self-signed TLS certificates are accepted "
+    "by default; see --webhook_tls_verify to enforce CA-chain validation.");
+ABSL_FLAG(bool, webhook_tls_verify, false,
+    "When false (the default), HTTPS webhook endpoints accept self-signed "
+    "certificates.  Set to true to enforce strict CA-chain validation — "
+    "only useful when the webhook server has a CA-signed certificate.");
 ABSL_FLAG(std::string, rtsp_audio, "",
     "Set enableRtspAudio in the Protect database for all adopted third-party "
     "cameras that have audio capability (hasAudio=true). "
@@ -818,6 +829,19 @@ int main(int argc, char* argv[]) {
   // TLS verification for HTTPS snapshot URLs (default: skip, cameras use self-signed certs).
   det_rec.set_snapshot_tls_verify(absl::GetFlag(FLAGS_snapshot_tls_verify));
 
+  // Webhook notifier: fire-and-forget HTTP POST on every new detection.
+  std::unique_ptr<onvif::WebhookNotifier> webhook_notifier;
+  {
+    const std::string webhook_url = absl::GetFlag(FLAGS_webhook_url);
+    if (!webhook_url.empty()) {
+      webhook_notifier = std::make_unique<onvif::WebhookNotifier>();
+      webhook_notifier->set_url(webhook_url);
+      webhook_notifier->set_tls_verify(absl::GetFlag(FLAGS_webhook_tls_verify));
+      det_rec.set_webhook_notifier(webhook_notifier.get());
+      LOG(INFO) << "[webhook] enabled: " << webhook_url;
+    }
+  }
+
   // Always use 24-char hex IDs.  MSR builds its thumbnail index from
   // frames it writes itself; a UBV file dropped on disk is invisible to
   // it, so non-24-char IDs route to MSR TCP and fail with error 414.
@@ -1157,6 +1181,7 @@ int main(int argc, char* argv[]) {
       cam.snapshot_profile = sp_it->second;
     listener.add_camera(cam);
     det_rec.set_snapshot(cam);
+    det_rec.register_webhook_camera(cam.ip, cam.name);
     LOG(INFO) << "Watching camera " << cam.ip;
   }
 
