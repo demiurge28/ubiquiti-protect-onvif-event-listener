@@ -1181,7 +1181,7 @@ int main(int argc, char* argv[]) {
       cam.snapshot_profile = sp_it->second;
     listener.add_camera(cam);
     det_rec.set_snapshot(cam);
-    det_rec.register_webhook_camera(cam.ip, cam.name);
+    det_rec.register_webhook_camera(cam.ip, cam.ip);  // CameraConfig has no display name
     LOG(INFO) << "Watching camera " << cam.ip;
   }
 
