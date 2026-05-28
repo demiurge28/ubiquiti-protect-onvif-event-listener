@@ -124,6 +124,13 @@ const std::vector<Entry>& Schema() {
      "profile.  Useful for multi-profile cameras (fisheye, e-PTZ) where the "
      "default Protect snapshot URL points at the wrong channel.",
      "Cameras"},
+    {"snapshot_tls_verify", Type::Bool,
+     "When false (default), HTTPS snapshot fetches accept self-signed "
+     "certificates, which is the common case for IP cameras.  Set to true "
+     "to enforce strict CA-chain validation of the camera's TLS certificate "
+     "(only useful when the camera has a certificate signed by a CA that the "
+     "recorder host trusts).",
+     "Cameras"},
 
     // ---- MSR forwarding ----
     {"msr_url", Type::String,

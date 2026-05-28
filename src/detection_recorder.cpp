@@ -169,19 +169,31 @@ static size_t curl_write_cb(void* data, size_t size, size_t nmemb, void* userp) 
   return total;
 }
 
+// @p tls_verify controls server certificate validation for HTTPS snapshot URLs.
+// Most cameras use self-signed certificates so the default is false (skip
+// verification).  Set to true when the camera has a CA-signed certificate
+// reachable from the device's trust store.
 static std::vector<unsigned char> fetch_snapshot(const std::string& url,
                                                   const std::string& user,
-                                                  const std::string& password) {
+                                                  const std::string& password,
+                                                  bool tls_verify = false) {
   std::vector<unsigned char> buf;
   CURL* curl = curl_easy_init();
   if (!curl) return buf;
 
   curl_easy_setopt(curl, CURLOPT_URL,            url.c_str());
   curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-  curl_easy_setopt(curl, CURLOPT_TIMEOUT,        5L);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT,        10L);  // allow TLS handshake
   curl_easy_setopt(curl, CURLOPT_NOSIGNAL,       1L);
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,  curl_write_cb);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA,      &buf);
+
+  // TLS: cameras commonly use self-signed certificates.  Skip peer/host
+  // verification unless the caller has opted in to strict checking.
+  if (!tls_verify) {
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);  // NOLINT(runtime/int)
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);  // NOLINT(runtime/int)
+  }
 
   if (!user.empty()) {
     std::string userpwd = user + ":" + password;
@@ -1112,6 +1124,11 @@ void DetectionRecorder::set_msr_burst_window_ms(uint64_t ms) {
   msr_burst_window_ms_ = ms;
 }
 
+void DetectionRecorder::set_snapshot_tls_verify(bool verify) {
+  absl::MutexLock lk(&mu_);
+  snapshot_tls_verify_ = verify;
+}
+
 uint64_t DetectionRecorder::msr_calls_for_testing() const {
   return stats_msr_ok_.load() + stats_msr_fail_.load();
 }
@@ -1209,6 +1226,7 @@ void DetectionRecorder::on_event(const OnvifEvent& ev) {
   if (det->started) {
     // 1. Coalesce / rate-limit checks then snapshot + config read (brief lock, no I/O).
     std::string snap_url, snap_user, snap_pass, ubv_dir, cam_uuid, cam_mac;
+    bool snap_tls_verify;
     uint64_t pre_ms;
     const object_detect::ObjectDetector* det_ptr;
     bool det_override;
@@ -1305,6 +1323,7 @@ void DetectionRecorder::on_event(const OnvifEvent& ev) {
       if (cit != camera_ids_.end()) cam_uuid = cit->second;
       auto mit = camera_macs_.find(ev.camera_ip);
       if (mit != camera_macs_.end()) cam_mac = mit->second;
+      snap_tls_verify = snapshot_tls_verify_;
       ubv_dir      = ubv_dir_;
       pre_ms       = pre_buffer_ms_;
       det_ptr      = detector_;
@@ -1348,7 +1367,7 @@ void DetectionRecorder::on_event(const OnvifEvent& ev) {
     if (db_->needs_snapshot() && !snap_url.empty()) {
       LOG(INFO) << '[' << ev.camera_ip << "] fetching snapshot from "
                 << snap_url;
-      snapshot = fetch_snapshot(snap_url, snap_user, snap_pass);
+      snapshot = fetch_snapshot(snap_url, snap_user, snap_pass, snap_tls_verify);
       if (snapshot.empty()) {
         LOG(WARNING) << '[' << ev.camera_ip << "] snapshot fetch failed or "
                      << "returned empty from " << snap_url

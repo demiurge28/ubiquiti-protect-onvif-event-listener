@@ -232,6 +232,7 @@ ExecStart=/usr/bin/onvif-recorder \
 | `--camera_snapshot_urls` | _(disabled)_ | Per-camera snapshot path overrides as comma-separated `ip=path` pairs, e.g. `192.168.1.107=/cgi-bin/snapshot.cgi`. Useful when the ONVIF-advertised URL is wrong (common on Dahua). |
 | `--camera_resolutions` | _(1920×1080 per camera)_ | Per-camera pixel resolutions as comma-separated `ip=WxH` pairs, e.g. `192.168.1.108=3840x2160`. Used to position the bounding-box grid overlay in Protect 7.1+. |
 | `--camera_snapshot_profiles` | _(auto-discover)_ | Per-camera ONVIF media profile token for snapshot selection, as comma-separated `ip=token` pairs, e.g. `192.168.1.108=MainStream`. See [Per-profile snapshot selection](#per-profile-snapshot-selection). |
+| `--snapshot_tls_verify` | `false` | When `false` (default), HTTPS snapshot fetches accept self-signed certificates (the common case for IP cameras). Set to `true` to enforce strict CA-chain validation — only needed when the camera presents a CA-signed certificate that the recorder host trusts. |
 
 ---
 
@@ -315,7 +316,8 @@ Profile token names vary by vendor. Common examples:
 - One snapshot profile per camera IP. Multiple concurrent channels with
   independent bounding-box coordinate spaces (e.g. four e-PTZ dewarped views
   simultaneously) are not yet supported.
-- HTTPS snapshot endpoints are not yet supported; the recorder connects to the
-  discovered URI over plain HTTP.
+- HTTPS snapshot endpoints are supported. The recorder accepts self-signed certificates
+  by default (`--snapshot_tls_verify=false`); set `--snapshot_tls_verify=true` to enforce
+  strict CA-chain validation for cameras with CA-signed certificates.
 - The discovered URL is held in memory and re-discovered on each service restart
   or camera reconnect — it is never written to the Protect database.
