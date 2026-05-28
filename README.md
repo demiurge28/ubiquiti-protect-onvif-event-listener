@@ -52,6 +52,18 @@ exchange** per (re)connect:
 See [FLAGS.md § Per-profile snapshot selection](FLAGS.md#per-profile-snapshot-selection)
 for the full reference, vendor token examples, and limitations.
 
+### HTTPS snapshot support
+
+Detection thumbnail fetches now work against `https://` camera snapshot URLs.
+Previously any `https://` URL would fail at TLS certificate verification because
+no SSL options were set on the curl handle.
+
+- By default (`--snapshot_tls_verify=false`) the recorder accepts **self-signed
+  certificates**, which is the common case for IP cameras.
+- Set `--snapshot_tls_verify=true` in the admin UI or `/etc/default/onvif-recorder.local`
+  to enforce strict CA-chain validation for cameras that present a CA-signed certificate.
+- Snapshot timeout extended 5 s → 10 s to accommodate TLS handshake latency.
+
 ### Bug fixes
 
 - **Diagnostic dump tarball race** — the admin UI's *Download diagnostic dump*
@@ -87,9 +99,8 @@ Key changes:
 
 ### Windows installer (no terminal required)
 
-If you're on Windows and don't want to touch SSH directly, download the
-latest `OnvifRecorderInstaller-v*.exe` from
-[Releases](https://github.com/danielwoz/ubiquiti-protect-onvif-event-listener/releases)
+Download the latest `OnvifRecorderInstaller-v*.exe` from
+[Releases](https://github.com/demiurge28/ubiquiti-protect-onvif-event-listener/releases)
 and run it. The GUI:
 
 1. Walks you through enabling SSH on your router
@@ -103,24 +114,38 @@ and run it. The GUI:
 The installer is unsigned, so Windows SmartScreen will prompt the first
 time — click **More info → Run anyway**.
 
-### One-line install (recommended for macOS/Linux users)
+### Install via .deb (recommended for macOS/Linux users)
 
-SSH to your UniFi device and run:
+Download the latest `.deb` from
+[Releases](https://github.com/demiurge28/ubiquiti-protect-onvif-event-listener/releases),
+copy it to your UniFi device, and install:
 
 ```bash
-curl -fsSL https://danielwoz.github.io/ubiquiti-protect-onvif-event-listener/install.sh | sh
+# On your Mac/Linux machine — substitute the actual version number:
+DEV=root@<router-ip>
+VER=1.7.0
+curl -fsSL -O \
+  https://github.com/demiurge28/ubiquiti-protect-onvif-event-listener/releases/download/v${VER}/onvif-recorder_${VER}_arm64.deb
+scp onvif-recorder_${VER}_arm64.deb ${DEV}:/tmp/
+ssh ${DEV} "dpkg -i /tmp/onvif-recorder_${VER}_arm64.deb"
 ```
 
-That's it. The installer:
+Or directly on the router over SSH:
 
-1. Installs the signing key to `/usr/share/keyrings/onvif-recorder-archive-keyring.gpg`.
-2. Detects your UniFi Protect release channel (Stable / Release Candidate /
-   Early Access) and configures APT to pull matching builds.
-3. `apt-get install onvif-recorder`, which auto-enables the systemd service
-   plus two daily timers: channel sync and auto-updates.
+```bash
+VER=1.7.0
+curl -fsSL -O \
+  https://github.com/demiurge28/ubiquiti-protect-onvif-event-listener/releases/download/v${VER}/onvif-recorder_${VER}_arm64.deb
+dpkg -i onvif-recorder_${VER}_arm64.deb
+```
 
-Detections will appear in UniFi Protect within seconds of the first motion
-event. Service logs land in journald (`journalctl -u onvif-recorder`).
+`dpkg -i` auto-enables the systemd service and two daily timers (channel sync,
+auto-update). Detections will appear in UniFi Protect within seconds of the
+first motion event. Service logs:
+
+```bash
+journalctl -u onvif-recorder -f
+```
 
 **What happens on first start:**
 
@@ -134,22 +159,20 @@ event. Service logs land in journald (`journalctl -u onvif-recorder`).
 
 No flags are required for the default setup.
 
+### Upgrading
+
+Repeat the same `dpkg -i` command with the new version number. The package
+migrates configuration automatically; no flags or database changes are needed.
+
 ### Admin UI
 
 After install, manage the package without SSH at
 `https://<device>/onvif/admin/`:
 
 - Force an update check
-- Switch release channel (stable / rc / early-access)
 - Enable / disable auto-updates and change the schedule
+- Edit configuration flags
 - Uninstall the package
-
-### Updates
-
-Auto-updates are **on by default**. The `onvif-recorder-autoupdate.timer` runs
-daily with up to 2h random jitter; `onvif-recorder-channel.timer` keeps the
-APT suite in sync with your Protect channel. Both can be disabled via the
-admin UI or `systemctl disable --now <timer>`.
 
 ### Uninstall
 
@@ -218,6 +241,26 @@ profile tokens your camera advertises:
 /usr/bin/onvif-recorder --verbose --raw_log=/tmp/onvif-raw.jsonl
 # grep GetProfiles in /tmp/onvif-raw.jsonl to see available profile tokens
 ```
+
+### Example: cameras with HTTPS snapshot URLs
+
+If your camera's snapshot URL uses `https://` (e.g. as advertised by `GetSnapshotUri`
+or set via `--camera_snapshot_urls`), the recorder accepts self-signed certificates
+by default — no configuration needed. To enforce strict CA-chain validation instead:
+
+```
+Admin UI -> Cameras -> snapshot_tls_verify -> true -> Save & restart
+```
+
+equivalent to:
+
+```bash
+echo 'ONVIF_RECORDER_FLAGS="--snapshot_tls_verify=true"' \
+    >> /etc/default/onvif-recorder.local
+systemctl restart onvif-recorder
+```
+
+Leave at `false` (the default) if your cameras use self-signed or no certificate.
 
 ---
 
