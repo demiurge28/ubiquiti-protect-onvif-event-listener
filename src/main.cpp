@@ -222,6 +222,12 @@ ABSL_FLAG(std::string, camera_snapshot_profiles, "",
     "snapshot URL.  Leave empty to auto-discover the first available "
     "profile. Useful for multi-profile cameras (fisheye, e-PTZ) whose "
     "default Protect snapshot URL points at the wrong channel.");
+ABSL_FLAG(bool, snapshot_tls_verify, false,
+    "When false (the default), HTTPS snapshot fetches accept self-signed "
+    "certificates, which is the common case for IP cameras.  Set to true "
+    "to enforce strict CA-chain validation of the camera's TLS certificate — "
+    "only useful when the camera has a certificate signed by a CA that the "
+    "recorder host trusts.");
 ABSL_FLAG(std::string, rtsp_audio, "",
     "Set enableRtspAudio in the Protect database for all adopted third-party "
     "cameras that have audio capability (hasAudio=true). "
@@ -808,6 +814,9 @@ int main(int argc, char* argv[]) {
 
   if (!thumbs_dir.empty())
     det_rec.set_ubv_dir(thumbs_dir);
+
+  // TLS verification for HTTPS snapshot URLs (default: skip, cameras use self-signed certs).
+  det_rec.set_snapshot_tls_verify(absl::GetFlag(FLAGS_snapshot_tls_verify));
 
   // Always use 24-char hex IDs.  MSR builds its thumbnail index from
   // frames it writes itself; a UBV file dropped on disk is invisible to

@@ -42,6 +42,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `discovered_resolutions_` map slots between `camera_image_sizes_` and the
     1920×1080 default in the Protect 7.1+ enrichment path.
 
+- **HTTPS snapshot support** (`--snapshot_tls_verify`): detection thumbnail fetches
+  now work against `https://` camera URLs. By default the recorder accepts self-signed
+  certificates — which is universal among IP cameras — by setting
+  `CURLOPT_SSL_VERIFYPEER=0` and `CURLOPT_SSL_VERIFYHOST=0` on the snapshot curl
+  handle. Set `--snapshot_tls_verify=true` to enforce strict CA-chain validation for
+  cameras that present a certificate signed by a trusted CA. The snapshot timeout is
+  extended from 5 s to 10 s to accommodate TLS handshake overhead.
+  - `DetectionRecorder::set_snapshot_tls_verify(bool)` public setter and
+    `snapshot_tls_verify_` private member.
+  - `fetch_snapshot()` static helper gains a `bool tls_verify` parameter.
+  - `ABSL_FLAG(bool, snapshot_tls_verify, false, …)` in `main.cpp`.
+  - `runtime_config` schema entry in the **Cameras** group.
+
 ### Changed
 
 ### Fixed

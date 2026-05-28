@@ -297,6 +297,13 @@ class DetectionRecorder {
   /// every event makes its own MSR call).
   void set_msr_burst_window_ms(uint64_t ms);
 
+  /// When false (the default), HTTPS snapshot fetches skip server certificate
+  /// verification, accepting self-signed certificates commonly used by IP
+  /// cameras.  Set to true to enforce strict CA-chain validation — only
+  /// useful when cameras have a certificate issued by a trusted CA accessible
+  /// from the recorder host.  Thread-safe.
+  void set_snapshot_tls_verify(bool verify);
+
   /// Test observability — number of times MSR was actually contacted
   /// vs. how many events triggered an MSR-eligible path.  Reset by the
   /// hourly aggregate emitter.
@@ -581,6 +588,12 @@ class DetectionRecorder {
   // same lock.  Overrides the 1920×1080 default but defers to the explicit
   // --camera_resolutions entries in camera_image_sizes_.
   std::map<std::string, std::pair<int, int>> discovered_resolutions_;
+
+  // When false (the default), HTTPS snapshot fetches skip SSL peer / host
+  // verification.  Most IP cameras use self-signed certificates; accepting
+  // them without a full CA chain is the common-case behaviour.  Set to true
+  // only when the camera presents a certificate signed by a trusted CA.
+  bool snapshot_tls_verify_{false};
 
   // Coalescing: last completed event per (camera_ip, detection_type).
   // real_end_ms is the wall-clock time (ms) when the detection ended, without
