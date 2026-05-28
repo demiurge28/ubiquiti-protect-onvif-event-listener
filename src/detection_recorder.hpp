@@ -32,8 +32,9 @@
 
 namespace onvif {
 
-class AlarmNotifier;  // forward declaration; full definition in alarm_notifier.hpp
-class MsrClient;      // forward declaration; full definition in msr_client.hpp
+class AlarmNotifier;    // forward declaration; full definition in alarm_notifier.hpp
+class MsrClient;        // forward declaration; full definition in msr_client.hpp
+class WebhookNotifier;  // forward declaration; full definition in webhook_notifier.hpp
 
 /**
  * DetectionRecorder
@@ -286,6 +287,17 @@ class DetectionRecorder {
   /// the same table — so production deployments should set this to true.
   void set_msr_drop_on_failure(bool drop);
 
+  /// Register a camera name with the webhook notifier so detection payloads
+  /// include the human-readable Protect camera name.  Must be called before
+  /// the listener starts.
+  void register_webhook_camera(const std::string& camera_ip,
+                               const std::string& camera_name);
+
+  /// Attach a WebhookNotifier that will be called for every new detection
+  /// event (not for coalesced detections).  The notifier must outlive the
+  /// recorder.  Must be called before run().  Thread-safe.
+  void set_webhook_notifier(WebhookNotifier* notifier);
+
   /// When @p ms > 0 and a successful MSR StoreSnapshots id was returned
   /// for this camera within the last @p ms milliseconds, reuse that id
   /// instead of calling MSR again.  This is the queue-coalescing
@@ -533,6 +545,9 @@ class DetectionRecorder {
 
   // Optional alarm notifier. Set before run(); non-owning raw pointer.
   AlarmNotifier* alarm_notifier_{nullptr};
+
+  // Optional webhook notifier. Set before run(); non-owning raw pointer.
+  WebhookNotifier* webhook_notifier_{nullptr};
 
   // Optional MSR gRPC client. Set before run(); non-owning raw pointer.
   MsrClient* msr_client_{nullptr};

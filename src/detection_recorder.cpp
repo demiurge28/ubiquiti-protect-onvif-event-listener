@@ -44,6 +44,7 @@
 #include "util.hpp"
 #include "alarm_notifier.hpp"
 #include "jpeg_crop.hpp"
+#include "webhook_notifier.hpp"
 #include "msr_client.hpp"
 #include "object_detect.hpp"
 #include "ubv_thumbnail.hpp"
@@ -1129,6 +1130,18 @@ void DetectionRecorder::set_snapshot_tls_verify(bool verify) {
   snapshot_tls_verify_ = verify;
 }
 
+void DetectionRecorder::set_webhook_notifier(WebhookNotifier* notifier) {
+  absl::MutexLock lk(&mu_);
+  webhook_notifier_ = notifier;
+}
+
+void DetectionRecorder::register_webhook_camera(const std::string& camera_ip,
+                                                 const std::string& camera_name) {
+  absl::MutexLock lk(&mu_);
+  if (webhook_notifier_)
+    webhook_notifier_->register_camera(camera_ip, camera_name);
+}
+
 uint64_t DetectionRecorder::msr_calls_for_testing() const {
   return stats_msr_ok_.load() + stats_msr_fail_.load();
 }
@@ -1231,6 +1244,7 @@ void DetectionRecorder::on_event(const OnvifEvent& ev) {
     const object_detect::ObjectDetector* det_ptr;
     bool det_override;
     AlarmNotifier* alarm_notif;
+    WebhookNotifier* webhook_notif;
     MsrClient* msr;
     bool msr_drop_on_failure;
     uint64_t msr_burst_window_ms;
@@ -1328,8 +1342,9 @@ void DetectionRecorder::on_event(const OnvifEvent& ev) {
       pre_ms       = pre_buffer_ms_;
       det_ptr      = detector_;
       det_override = detect_override_;
-      alarm_notif  = alarm_notifier_;
-      msr          = msr_client_;
+      alarm_notif     = alarm_notifier_;
+      webhook_notif   = webhook_notifier_;
+      msr             = msr_client_;
       msr_drop_on_failure = msr_drop_on_failure_;
       msr_burst_window_ms = msr_burst_window_ms_;
       // Probe the burst cache while we still hold the lock.  We can't
@@ -1658,11 +1673,13 @@ void DetectionRecorder::on_event(const OnvifEvent& ev) {
       }
     }  // lock released
 
-    // 5. Trigger Protect automations (HTTP I/O, must be outside lock).
-    // AlarmNotifier calls POST /api/automations/{id}/run on the local Protect API.
+    // 5. Trigger Protect automations and webhook (HTTP I/O, must be outside lock).
     // Only notify for new events, not for detections coalesced into an existing one.
-    if (coalesced_event_id.empty() && alarm_notif && !cam_mac.empty()) {
-      alarm_notif->notify(obj_type, cam_mac, event_id, ts_ms);
+    if (coalesced_event_id.empty()) {
+      if (alarm_notif && !cam_mac.empty())
+        alarm_notif->notify(obj_type, cam_mac, event_id, ts_ms);
+      if (webhook_notif)
+        webhook_notif->notify(obj_type, ev.camera_ip, event_id, ts_ms);
     }
 
   } else {

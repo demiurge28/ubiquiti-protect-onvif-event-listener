@@ -5,6 +5,44 @@ All notable changes to ONVIF Event Recorder will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Webhook notifications** (`--webhook_url`): the recorder now POSTs a JSON
+  detection payload to a user-configured HTTP/HTTPS endpoint on every new smart
+  detection event. Payload carries `event`, `type`, `camera_ip`, `camera_name`,
+  `event_id`, `timestamp_ms`, and `timestamp` fields — ready for Home Assistant,
+  ntfy.sh, Telegram bots, Discord, or any custom endpoint. Webhooks fire only
+  for new events, not for coalesced detections (same semantics as Protect
+  automations). The POST is fire-and-forget with a 5-second timeout.
+  - `--webhook_tls_verify=false` (default) accepts self-signed certificates;
+    set to `true` for servers with CA-signed certs.
+  - New `WebhookNotifier` class (`src/webhook_notifier.hpp/.cpp`): thread-safe,
+    builds JSON payload with `util::json_str`, POSTs via libcurl.
+  - `DetectionRecorder::set_webhook_notifier()` / `register_webhook_camera()`:
+    wired into `on_event()` step 5 alongside `AlarmNotifier`.
+  - `ABSL_FLAG(string, webhook_url, "", …)` and
+    `ABSL_FLAG(bool, webhook_tls_verify, false, …)` in `main.cpp`.
+  - `runtime_config` schema entries (`webhook_url`, `webhook_tls_verify`) in
+    the **Cameras** group so the admin UI exposes them.
+  - `FLAGS.md` **Webhook notifications** section with payload format, examples
+    for ntfy.sh and Home Assistant, and flag reference.
+
+### Changed
+
+### Fixed
+
+### Dependencies
+
+### Migration Notes
+
+- No action required. The feature is disabled by default (`--webhook_url` is
+  empty). Set the URL via the admin UI or `/etc/default/onvif-recorder.local`
+  to activate.
+
+---
+
 ## [v1.7.0] - 2026-05-28
 
 ### Added

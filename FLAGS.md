@@ -233,6 +233,8 @@ ExecStart=/usr/bin/onvif-recorder \
 | `--camera_resolutions` | _(1920×1080 per camera)_ | Per-camera pixel resolutions as comma-separated `ip=WxH` pairs, e.g. `192.168.1.108=3840x2160`. Used to position the bounding-box grid overlay in Protect 7.1+. |
 | `--camera_snapshot_profiles` | _(auto-discover)_ | Per-camera ONVIF media profile token for snapshot selection, as comma-separated `ip=token` pairs, e.g. `192.168.1.108=MainStream`. See [Per-profile snapshot selection](#per-profile-snapshot-selection). |
 | `--snapshot_tls_verify` | `false` | When `false` (default), HTTPS snapshot fetches accept self-signed certificates (the common case for IP cameras). Set to `true` to enforce strict CA-chain validation — only needed when the camera presents a CA-signed certificate that the recorder host trusts. |
+| `--webhook_url` | _(disabled)_ | HTTP/HTTPS URL to POST a JSON detection payload to on every new smart detection event. Empty disables the webhook. See [Webhook notifications](#webhook-notifications). |
+| `--webhook_tls_verify` | `false` | When `false` (default), HTTPS webhook endpoints accept self-signed certificates. Set to `true` to enforce CA-chain validation. |
 
 ---
 
@@ -321,3 +323,75 @@ Profile token names vary by vendor. Common examples:
   strict CA-chain validation for cameras with CA-signed certificates.
 - The discovered URL is held in memory and re-discovered on each service restart
   or camera reconnect — it is never written to the Protect database.
+
+---
+
+## Webhook notifications
+
+The recorder can POST a JSON payload to any HTTP/HTTPS endpoint on every new
+smart detection event. This enables integrations with Home Assistant, ntfy.sh,
+Telegram, Discord, or any custom script — without requiring Protect automations.
+
+**Payload (`application/json`):**
+```json
+{
+  "event":        "detection_start",
+  "type":         "person",
+  "camera_ip":    "192.168.1.108",
+  "camera_name":  "Front Door",
+  "event_id":     "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp_ms": 1748449200000,
+  "timestamp":    "2026-05-28T06:00:00Z"
+}
+```
+
+**Behaviour:**
+- Webhooks fire only for **new** events — not for detections coalesced into an
+  existing event (same semantics as Protect automations).
+- The POST is fire-and-forget with a 5-second timeout; failures are logged but
+  do not affect detection recording.
+- Self-signed HTTPS certificates are accepted by default; set `--webhook_tls_verify=true`
+  for servers with CA-signed certificates.
+
+**Enable via admin UI or command line:**
+
+```
+Admin UI → Cameras → webhook_url → https://ntfy.sh/my-topic → Save & restart
+```
+
+equivalent to:
+
+```bash
+echo 'ONVIF_RECORDER_FLAGS="--webhook_url=https://ntfy.sh/my-topic"' \
+    >> /etc/default/onvif-recorder.local
+systemctl restart onvif-recorder
+```
+
+**Example: ntfy.sh push notification**
+
+```bash
+# ntfy.sh accepts a plain POST body as the notification message, but
+# onvif-recorder sends JSON.  Use a small HTTP relay or Home Assistant
+# automation to adapt the payload, or point at any endpoint that accepts JSON.
+--webhook_url=https://ntfy.sh/your-topic
+```
+
+**Example: Home Assistant webhook**
+
+```bash
+--webhook_url=http://homeassistant.local:8123/api/webhook/onvif-detection
+```
+
+In Home Assistant, create an automation with trigger:
+```yaml
+platform: webhook
+webhook_id: onvif-detection
+```
+
+then use `{{ trigger.json.type }}` and `{{ trigger.json.camera_name }}` in
+actions.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--webhook_url` | _(disabled)_ | URL to POST detection events to. |
+| `--webhook_tls_verify` | `false` | Enforce CA-chain TLS validation on HTTPS webhook endpoints. |
