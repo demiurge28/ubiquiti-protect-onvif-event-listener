@@ -387,6 +387,46 @@ struct XmlDoc {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Topic normalisation (declared in onvif_listener.hpp)
+// ---------------------------------------------------------------------------
+
+}  // anonymous namespace
+
+std::string normalize_topic(const std::string& raw) {
+  // Fast path: no slashes → nothing to normalise.
+  auto first_slash = raw.find('/');
+  if (first_slash == std::string::npos) return raw;
+
+  // Keep everything up to and including the first '/' verbatim.
+  std::string out = raw.substr(0, first_slash + 1);
+  out.reserve(raw.size());
+
+  // Walk remaining segments and strip known namespace prefixes.
+  size_t pos = first_slash + 1;
+  while (pos < raw.size()) {
+    auto next_slash = raw.find('/', pos);
+    std::string seg = raw.substr(pos, next_slash == std::string::npos
+                                          ? std::string::npos
+                                          : next_slash - pos);
+    // Strip tns1:, tns2:, tnsaxis: prefix.
+    for (const char* pfx : {"tns1:", "tns2:", "tnsaxis:"}) {
+      size_t plen = std::strlen(pfx);
+      if (seg.size() > plen && seg.compare(0, plen, pfx) == 0) {
+        seg = seg.substr(plen);
+        break;
+      }
+    }
+    out += seg;
+    if (next_slash == std::string::npos) break;
+    out += '/';
+    pos = next_slash + 1;
+  }
+  return out;
+}
+
+namespace {
+
 // Extract the path (and optional query) component from a URL string.
 // "http://192.168.1.1:80/onvif/events?x=1" -> "/onvif/events?x=1"
 // Returns "/" when no path is found.
@@ -905,7 +945,8 @@ class CameraWorker {
       xmlNodePtr node = notifs->nodesetval->nodeTab[i];
       Notification n;
 
-      n.topic = XmlDoc::trim(doc.text("wsnt:Topic", node));
+      n.topic = normalize_topic(
+          XmlDoc::trim(doc.text("wsnt:Topic", node)));
 
       auto msg_obj = doc.xpath(".//tt:Message", node);
       if (!msg_obj || !msg_obj->nodesetval ||

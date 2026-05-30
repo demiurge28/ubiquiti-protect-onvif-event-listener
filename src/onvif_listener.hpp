@@ -158,6 +158,19 @@ using ResolutionCallback =
     std::function<void(const std::string& camera_ip, int width, int height)>;
 
 // ---------------------------------------------------------------
+// Topic normalisation
+// ---------------------------------------------------------------
+
+// Strip redundant namespace prefixes (tns1:, tns2:, tnsaxis:) from
+// path segments after the first '/'.  Some cameras (e.g. Flir) include
+// the prefix on every segment:
+//   "tns1:RuleEngine/tns1:CellMotionDetector/tns1:Motion"
+// The canonical form used by classify() keeps the prefix only on the
+// first segment:
+//   "tns1:RuleEngine/CellMotionDetector/Motion"
+std::string normalize_topic(const std::string& raw);
+
+// ---------------------------------------------------------------
 // Library lifecycle -- call once from main() around all listeners
 // ---------------------------------------------------------------
 void global_init();

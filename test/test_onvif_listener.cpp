@@ -831,6 +831,64 @@ static void test_snapshot_discovery_no_media_service() {
 }
 
 // ============================================================
+// Test: normalize_topic strips redundant namespace prefixes
+// ============================================================
+static void test_normalize_topic() {
+  // Already canonical — no change.
+  CHECK(onvif::normalize_topic("tns1:RuleEngine/CellMotionDetector/Motion")
+        == "tns1:RuleEngine/CellMotionDetector/Motion",
+        "already-canonical topic should be unchanged");
+
+  // Flir-style: tns1: on every segment.
+  CHECK(onvif::normalize_topic(
+            "tns1:RuleEngine/tns1:CellMotionDetector/tns1:Motion")
+        == "tns1:RuleEngine/CellMotionDetector/Motion",
+        "tns1: on all segments");
+
+  CHECK(onvif::normalize_topic(
+            "tns1:VideoSource/tns1:MotionAlarm")
+        == "tns1:VideoSource/MotionAlarm",
+        "tns1: on two segments");
+
+  CHECK(onvif::normalize_topic(
+            "tns1:RuleEngine/tns1:FieldDetector")
+        == "tns1:RuleEngine/FieldDetector",
+        "tns1: FieldDetector two segments");
+
+  // tns2: prefix.
+  CHECK(onvif::normalize_topic(
+            "tns1:RuleEngine/tns2:CellMotionDetector/tns2:Motion")
+        == "tns1:RuleEngine/CellMotionDetector/Motion",
+        "tns2: prefix stripped");
+
+  // tnsaxis: prefix.
+  CHECK(onvif::normalize_topic(
+            "tns1:RuleEngine/tnsaxis:FieldDetector/tnsaxis:ObjectsInside")
+        == "tns1:RuleEngine/FieldDetector/ObjectsInside",
+        "tnsaxis: prefix stripped");
+
+  // Mixed prefixes.
+  CHECK(onvif::normalize_topic(
+            "tns1:UserAlarm/tns2:IVA/tnsaxis:HumanShapeDetect")
+        == "tns1:UserAlarm/IVA/HumanShapeDetect",
+        "mixed prefixes stripped");
+
+  // No slashes — passthrough.
+  CHECK(onvif::normalize_topic("tns1:SingleSegment")
+        == "tns1:SingleSegment",
+        "single segment passthrough");
+
+  // Empty string.
+  CHECK(onvif::normalize_topic("") == "",
+        "empty string passthrough");
+
+  // No namespace prefix at all.
+  CHECK(onvif::normalize_topic("RuleEngine/CellMotionDetector/Motion")
+        == "RuleEngine/CellMotionDetector/Motion",
+        "no-prefix topic unchanged");
+}
+
+// ============================================================
 // main
 // ============================================================
 int main(int argc, char* argv[]) {
@@ -919,6 +977,8 @@ int main(int argc, char* argv[]) {
            [] { test_resolution_discovery_auto(); });
   run_test("resolution_discovery_explicit",
            [] { test_resolution_discovery_explicit(); });
+  run_test("normalize_topic",
+           [] { test_normalize_topic(); });
 
   onvif::global_cleanup();
 

@@ -108,6 +108,18 @@ std::optional<Detection> classify(const OnvifEvent& ev,
     return Detection{"vehicle", it->second == "true", ev.event_time};
   }
 
+  // --- Generic FieldDetector (Flir, etc.) ---
+  // Some cameras send FieldDetector without the /ObjectsInside suffix and
+  // without Human/Vehicle rule classification.  Treat as generic motion
+  // (from_fallback=true) so NanoDet-M can infer the object type from the
+  // snapshot.  Check IsInside (preferred) then State for the active flag.
+  if (ev.topic == "tns1:RuleEngine/FieldDetector") {
+    auto it = ev.data.find("IsInside");
+    if (it == ev.data.end()) it = ev.data.find("State");
+    if (it == ev.data.end()) return {};
+    return Detection{fallback_type, it->second == "true", ev.event_time, true};
+  }
+
   // --- Generic CellMotionDetector/Motion (Amcrest, Lorex, Dahua, etc.) ---
   // Basic pixel-change motion; no object class from ONVIF.  Uses fallback_type
   // unless NanoDet-M (--detect / --detect_override) infers a class from the
