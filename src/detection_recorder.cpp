@@ -1379,8 +1379,11 @@ void DetectionRecorder::on_event(const OnvifEvent& ev) {
     const uint64_t    ts_ms      = util::now_ms() - pre_ms;  // padded start
     const std::string now_str    = util::utc_now_iso8601();
     // Use the existing event ID when coalescing; generate a fresh one otherwise.
-    const std::string event_id   = coalesced_event_id.empty() ? util::generate_uuid()
-                                                              : coalesced_event_id;
+    // event_id is non-const: NanoDet-M type inference may clear the coalesce
+    // decision and regenerate the ID when the inferred type differs from the
+    // fallback type (see the re-key block after NanoDet-M inference below).
+    std::string event_id   = coalesced_event_id.empty() ? util::generate_uuid()
+                                                        : coalesced_event_id;
     const std::string sdo_id     = util::generate_uuid();
     const std::string sdr_id     = util::generate_uuid();
     const std::string sdtrk_id   = util::generate_uuid();
@@ -1440,6 +1443,18 @@ void DetectionRecorder::on_event(const OnvifEvent& ev) {
                 object_detect::detection_type(det_result->class_id);
             obj_type = inferred;
             sdt_json = smart_detect_types_json(inferred);
+            // Re-key by inferred type so person/vehicle/animal events
+            // are never coalesced together.  If the early coalesce check
+            // matched under the old (fallback) key, undo it — the event
+            // will be created fresh under the real type's key.
+            auto real_key = std::make_pair(ev.camera_ip, inferred);
+            if (real_key != key) {
+              if (!coalesced_event_id.empty()) {
+                coalesced_event_id.clear();
+                event_id = util::generate_uuid();
+              }
+              key = real_key;
+            }
           }
           // Only crop when we have a basis: an ONVIF bbox, or a loaded
           // detector (which may yield a result or fall back to smart-crop).
@@ -1697,20 +1712,35 @@ void DetectionRecorder::on_event(const OnvifEvent& ev) {
   } else {
     // Detection ended -- UPDATE the open events row with end time + updatedAt.
     absl::MutexLock lk(&mu_);
-    auto it = open_.find(key);
-    if (it == open_.end()) return;
+
+    // For from_fallback events the key uses the pre-inference fallback type,
+    // but the open event may have been stored under the NanoDet-M inferred
+    // type (person / vehicle / animal).  Close ALL open fallback-origin
+    // events for this camera so the end signal is never missed.
+    std::vector<std::pair<std::string, std::string>> keys_to_close;
+    if (det->from_fallback) {
+      for (auto& kv : open_) {
+        if (kv.first.first == ev.camera_ip)
+          keys_to_close.push_back(kv.first);
+      }
+    } else {
+      if (open_.count(key))
+        keys_to_close.push_back(key);
+    }
+    if (keys_to_close.empty()) return;
 
     const uint64_t    wall_now = util::now_ms();
     const uint64_t    end_ms   = wall_now + post_buffer_ms_;  // padded end
     const std::string now_str  = util::utc_now_iso8601();
-    const std::string ended_id = it->second;
 
-    db_->update_event_end(ended_id, end_ms, now_str);
-    open_.erase(it);
-
-    // Coalescing: remember when this detection ended (wall-clock, unpadded)
-    // so the next detection within coalesce_window_ms_ can extend this event.
-    last_event_[key] = {ended_id, wall_now};
+    for (const auto& k : keys_to_close) {
+      auto it = open_.find(k);
+      if (it == open_.end()) continue;
+      const std::string ended_id = it->second;
+      db_->update_event_end(ended_id, end_ms, now_str);
+      open_.erase(it);
+      last_event_[k] = {ended_id, wall_now};
+    }
   }
 }
 
