@@ -108,7 +108,7 @@ ABSL_FLAG(int32_t, cpu_profile_hz, 0,
     "10-100 is typical; output is exposed at /api/cpuz under the "
     "auth-gated admin API.");
 ABSL_FLAG(std::string, model_dir, "/usr/share/onvif-recorder/models",
-    "Directory containing nanodet_m.param and nanodet_m.bin. "
+    "Directory containing NanoDet-Plus-m 416 model files. "
     "Models are shipped in the Debian package at this path; if missing, "
     "they are downloaded automatically.");
 ABSL_FLAG(std::string, state_dir, "/var/lib/onvif-recorder",
@@ -784,8 +784,8 @@ int main(int argc, char* argv[]) {
       LOG(WARNING) << "[detect] model files missing and download failed";
     }
     auto det = object_detect::ObjectDetector::Load(
-        model_dir + "/nanodet_m.param",
-        model_dir + "/nanodet_m.bin");
+        model_dir + "/nanodet-plus-m_416.param",
+        model_dir + "/nanodet-plus-m_416.bin");
     if (det.ok()) {
       detector = std::move(*det);
       det_rec.set_detector(detector.get());

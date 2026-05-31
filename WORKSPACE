@@ -137,16 +137,19 @@ http_archive(
     build_file = "//third_party:ncnn.BUILD",
 )
 
-# NanoDet-M model files for object detection.
+# NanoDet-Plus-m 416 model files for object detection.
+# Extracted from https://github.com/RangiLyu/nanodet/releases/download/v1.0.0-alpha-1/nanodet-plus-m_416_ncnn.zip
 http_file(
     name = "nanodet_m_param",
-    sha256 = "8543dccd5604ded10d06bdb2b2f702f8f2f1dac09652c81750f21bf0a6e3f1a8",
-    urls = ["https://github.com/nihui/ncnn-assets/raw/refs/heads/master/models/nanodet_m.param"],
+    sha256 = "d79e18ecd8595081bb29fdf0c790a47fcea96fbf58598350569a92e71e915b72",
+    downloaded_file_path = "nanodet-plus-m_416.param",
+    urls = ["https://github.com/demiurge28/ubiquiti-protect-onvif-event-listener/releases/download/v1.8.2/nanodet-plus-m_416.param"],
 )
 http_file(
     name = "nanodet_m_bin",
-    sha256 = "8d7f846cfc340a3ef66389f174a66819709f7182b9d35788ee1506679caac65e",
-    urls = ["https://github.com/nihui/ncnn-assets/raw/refs/heads/master/models/nanodet_m.bin"],
+    sha256 = "f7555ca6cb9650ee41e2f0a53fdf46b6e187a2a09792208d8c3eec033b6ac615",
+    downloaded_file_path = "nanodet-plus-m_416.bin",
+    urls = ["https://github.com/demiurge28/ubiquiti-protect-onvif-event-listener/releases/download/v1.8.2/nanodet-plus-m_416.bin"],
 )
 
 # arm64 cross-compilation sysroot + toolchain.

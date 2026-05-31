@@ -49,12 +49,12 @@ jobs:
             https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
           sudo chmod +x /usr/local/bin/bazel
 
-      - name: Fetch NanoDet-M model files
+      - name: Fetch NanoDet-Plus-m model files
         run: |
-          curl -fL -o nanodet_m.param \
-            https://github.com/nihui/ncnn-assets/raw/refs/heads/master/models/nanodet_m.param
-          curl -fL -o nanodet_m.bin \
-            https://github.com/nihui/ncnn-assets/raw/refs/heads/master/models/nanodet_m.bin
+          curl -fL -o nanodet-plus-m_416.param \
+            https://github.com/demiurge28/ubiquiti-protect-onvif-event-listener/releases/download/v1.8.2/nanodet-plus-m_416.param
+          curl -fL -o nanodet-plus-m_416.bin \
+            https://github.com/demiurge28/ubiquiti-protect-onvif-event-listener/releases/download/v1.8.2/nanodet-plus-m_416.bin
 
       - name: Compute version
         id: ver
