@@ -169,7 +169,10 @@ int main(int argc, char* argv[]) {
 
     // --- detect crop (or smart_crop fallback) ---
     std::optional<object_detect::Detection> det_result;
-    if (detector) det_result = detector->detect(input);
+    if (detector) {
+      auto all_dets = detector->detect(input);
+      det_result = object_detect::best_detection(all_dets);
+    }
     const jpeg_crop::BoundingBox* det_bbox_ptr =
         det_result ? &det_result->bbox : nullptr;
 

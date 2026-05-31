@@ -82,6 +82,18 @@ struct Detection {
   float confidence;   // [0, 1] from the NanoDet-M head
 };
 
+/// Return the highest-confidence detection from a vector, or nullopt.
+/// Convenience wrapper for callers that only need the single best hit.
+inline std::optional<Detection> best_detection(
+    const std::vector<Detection>& dets) {
+  if (dets.empty()) return std::nullopt;
+  const auto* best = &dets[0];
+  for (size_t i = 1; i < dets.size(); ++i) {
+    if (dets[i].confidence > best->confidence) best = &dets[i];
+  }
+  return *best;
+}
+
 /// Map a COCO class ID to a UniFi Protect detection type string.
 /// Covers the security-relevant subset detected by NanoDet-M.
 /// Returns "person" for class 0 and any unrecognised ID.
@@ -132,10 +144,11 @@ class ObjectDetector {
   ObjectDetector& operator=(const ObjectDetector&) = delete;
 
   /// Detect objects in a JPEG image.
-  /// Returns the highest-confidence security-relevant detection (bounding box
-  /// in normalised [0,1] coordinates + COCO class ID), or nullopt if none
-  /// found above the confidence threshold.
-  std::optional<Detection> detect(
+  /// Returns all security-relevant detections above the confidence threshold,
+  /// sorted by confidence (highest first).  Each detection has a bounding box
+  /// in normalised [0,1] coordinates and a COCO class ID.
+  /// Returns an empty vector when no objects are found.
+  std::vector<Detection> detect(
       const std::vector<uint8_t>& jpeg_bytes) const;
 
  private:

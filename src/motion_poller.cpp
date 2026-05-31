@@ -695,7 +695,8 @@ void MotionPoller::poll_loop() {
         std::vector<uint8_t> jpeg;  // the image that actually produced det
         for (const auto* candidate : {&jpeg_crop, &jpeg_wide}) {
           if (candidate->empty()) continue;
-          auto d = impl_->detector->detect(*candidate);
+          auto all_dets = impl_->detector->detect(*candidate);
+          auto d = object_detect::best_detection(all_dets);
           if (d.has_value() &&
               object_detect::is_security_relevant(d->class_id)) {
             det = d;
