@@ -1,14 +1,14 @@
 #!/bin/sh
 # install.sh — one-line installer for onvif-recorder.
 #
-#   curl -fsSL https://danielwoz.github.io/ubiquiti-protect-onvif-event-listener/install.sh | sh
+#   curl -fsSL https://demiurge28.github.io/ubiquiti-protect-onvif-event-listener/install.sh | sh
 #
 # Detects the user's UniFi Protect release channel (Stable / Release Candidate
 # / Early Access) and configures APT to pull matching onvif-recorder builds.
 # Safe to re-run; it just (re)writes the keyring + sources list.
 set -e
 
-REPO_URL="https://danielwoz.github.io/ubiquiti-protect-onvif-event-listener"
+REPO_URL="https://demiurge28.github.io/ubiquiti-protect-onvif-event-listener"
 KEYRING=/usr/share/keyrings/onvif-recorder-archive-keyring.gpg
 SRC_FILE=/etc/apt/sources.list.d/onvif-recorder.list
 CHANNEL_FILE=/etc/onvif-recorder/channel
