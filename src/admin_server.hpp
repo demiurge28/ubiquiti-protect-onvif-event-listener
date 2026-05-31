@@ -63,6 +63,15 @@ class AdminServer {
   ~AdminServer();
 
   AdminServer() = default;
+
+  /// Discover ONVIF media profiles from a camera at @p ip.  Returns a JSON
+  /// array string with one object per profile (token, width, height,
+  /// encoding, rtsp_url, snapshot_url, active).  @p active_token marks the
+  /// currently-selected profile, if any.  Empty-string credentials skip
+  /// WS-Security headers.  Used by the admin UI "Discover" button.
+  static std::string DiscoverProfiles(
+      const std::string& ip, const std::string& user,
+      const std::string& pass, const std::string& active_token);
   AdminServer(const AdminServer&)            = delete;
   AdminServer& operator=(const AdminServer&) = delete;
 

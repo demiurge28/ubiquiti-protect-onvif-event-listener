@@ -807,13 +807,15 @@ static std::string onvif_build_soap(
 }
 
 static std::string onvif_soap_post(const std::string& url,
-                                    const std::string& body) {
+                                    const std::string& body,
+                                    const std::string& action = "") {
   CURL* c = curl_easy_init();
   if (!c) return {};
   std::string resp;
   struct curl_slist* hdrs = nullptr;
-  hdrs = curl_slist_append(hdrs,
-      "Content-Type: application/soap+xml; charset=utf-8");
+  std::string ct = "Content-Type: application/soap+xml; charset=utf-8";
+  if (!action.empty()) ct += "; action=\"" + action + "\"";
+  hdrs = curl_slist_append(hdrs, ct.c_str());
   curl_easy_setopt(c, CURLOPT_URL, url.c_str());
   curl_easy_setopt(c, CURLOPT_POSTFIELDS, body.c_str());
   curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
@@ -861,7 +863,7 @@ static std::string onvif_xpath_text(const std::string& xml,
 }
 
 // Discover ONVIF profiles from a camera.  Returns JSON array string.
-static std::string discover_camera_profiles(
+std::string discover_camera_profiles(
     const std::string& ip, const std::string& user,
     const std::string& pass, const std::string& active_token) {
   const std::string media_url = "http://" + ip + "/onvif/media_service";
@@ -869,7 +871,7 @@ static std::string discover_camera_profiles(
       "http://www.onvif.org/ver10/media/wsdl/GetProfiles";
   std::string soap = onvif_build_soap(user, pass,
       "<trt:GetProfiles/>\n", media_url, action);
-  std::string resp = onvif_soap_post(media_url, soap);
+  std::string resp = onvif_soap_post(media_url, soap, action);
   if (resp.empty()) return "[]";
 
   // Parse all Profiles from the response.
@@ -927,10 +929,11 @@ static std::string discover_camera_profiles(
             "</tt:Transport></trt:StreamSetup>\n"
             "<trt:ProfileToken>" + token + "</trt:ProfileToken>\n"
             "</trt:GetStreamUri>\n";
+        const std::string stream_action =
+            "http://www.onvif.org/ver10/media/wsdl/GetStreamUri";
         std::string s2 = onvif_build_soap(user, pass, body,
-            media_url,
-            "http://www.onvif.org/ver10/media/wsdl/GetStreamUri");
-        std::string r2 = onvif_soap_post(media_url, s2);
+            media_url, stream_action);
+        std::string r2 = onvif_soap_post(media_url, s2, stream_action);
         if (!r2.empty())
           rtsp_uri = onvif_xpath_text(r2,
               "//*[local-name()='Uri']");
@@ -943,10 +946,11 @@ static std::string discover_camera_profiles(
             "<trt:GetSnapshotUri>\n"
             "<trt:ProfileToken>" + token + "</trt:ProfileToken>\n"
             "</trt:GetSnapshotUri>\n";
+        const std::string snap_action =
+            "http://www.onvif.org/ver10/media/wsdl/GetSnapshotUri";
         std::string s3 = onvif_build_soap(user, pass, body,
-            media_url,
-            "http://www.onvif.org/ver10/media/wsdl/GetSnapshotUri");
-        std::string r3 = onvif_soap_post(media_url, s3);
+            media_url, snap_action);
+        std::string r3 = onvif_soap_post(media_url, s3, snap_action);
         if (!r3.empty())
           snap_uri = onvif_xpath_text(r3,
               "//*[local-name()='Uri']");
@@ -1758,6 +1762,12 @@ void request_completed(void* /*cls*/,
 }
 
 }  // namespace
+
+std::string AdminServer::DiscoverProfiles(
+    const std::string& ip, const std::string& user,
+    const std::string& pass, const std::string& active_token) {
+  return discover_camera_profiles(ip, user, pass, active_token);
+}
 
 bool AdminServer::start(const std::string& version,
                         const std::string& channel_file,

@@ -678,6 +678,7 @@ std::pair<int, std::string> MediaServiceEmulator::handle(
       "<trt:Profiles token=\"MainStream\">"
       "<tt:Name>Main Stream</tt:Name>"
       "<tt:VideoEncoderConfiguration token=\"MainStream_venc\">"
+      "<tt:Encoding>H265</tt:Encoding>"
       "<tt:Resolution>"
       "<tt:Width>3840</tt:Width>"
       "<tt:Height>2160</tt:Height>"
@@ -687,6 +688,7 @@ std::pair<int, std::string> MediaServiceEmulator::handle(
       "<trt:Profiles token=\"SubStream\">"
       "<tt:Name>Sub Stream</tt:Name>"
       "<tt:VideoEncoderConfiguration token=\"SubStream_venc\">"
+      "<tt:Encoding>H264</tt:Encoding>"
       "<tt:Resolution>"
       "<tt:Width>640</tt:Width>"
       "<tt:Height>480</tt:Height>"
@@ -697,6 +699,31 @@ std::pair<int, std::string> MediaServiceEmulator::handle(
       "</SOAP-ENV:Body>"
       "</SOAP-ENV:Envelope>";
     return {200, resp};
+  }
+
+  // ---- GetStreamUri: return RTSP URL based on profile token in request ----
+  if (tail == "GetStreamUri") {
+    const std::string token = extract_profile_token(body);
+    const std::string uri =
+        "rtsp://" + real_ip_ + "/stream/" + token;
+    std::string resp =
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+      "<SOAP-ENV:Envelope"
+      "  xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+      "  xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\""
+      "  xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
+      "<SOAP-ENV:Body>"
+      "<trt:GetStreamUriResponse>"
+      "<trt:MediaUri>"
+      "<tt:Uri>" + uri + "</tt:Uri>"
+      "<tt:InvalidAfterConnect>false</tt:InvalidAfterConnect>"
+      "<tt:InvalidAfterReboot>false</tt:InvalidAfterReboot>"
+      "<tt:Timeout>PT0S</tt:Timeout>"
+      "</trt:MediaUri>"
+      "</trt:GetStreamUriResponse>"
+      "</SOAP-ENV:Body>"
+      "</SOAP-ENV:Envelope>";
+    return {200, rewrite_urls(resp)};
   }
 
   // ---- GetSnapshotUri: return URL based on profile token in request ----

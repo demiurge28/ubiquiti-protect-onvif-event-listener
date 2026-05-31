@@ -359,6 +359,16 @@ cc_test(
 )
 
 cc_test(
+    name = "test_admin_discovery",
+    srcs = ["test_admin_discovery.cpp"],
+    deps = [
+        "//:admin_server",
+        ":camera_emulators",
+        ":onvif_camera_emulator",
+    ],
+)
+
+cc_test(
     name = "test_motion_poller",
     srcs = ["test_motion_poller.cpp"],
     linkstatic = True,
