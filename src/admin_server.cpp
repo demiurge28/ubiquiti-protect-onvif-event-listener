@@ -16,9 +16,16 @@
 
 #include <arpa/inet.h>
 #include <curl/curl.h>
+#include <libpq-fe.h>
 #include <gperftools/malloc_extension.h>
 #include <microhttpd.h>
 #include <netinet/in.h>
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <libxml/parser.h>
+#include <libxml/tree.h>
+#include <libxml/xpath.h>
+#include <libxml/xpathInternals.h>
 
 #if MHD_VERSION < 0x00097100
 typedef int MHD_Result;
@@ -429,6 +436,17 @@ async function loadCameraHealth(){
     const now = j.now_ms || Date.now();
     body.innerHTML = j.cameras.map(c => {
       const age = c.last_event_ms ? (now - c.last_event_ms) : null;
+      const streamRow = c.is_third_party
+        ? `<tr><td colspan="6" style="padding:2px 6px 6px 22px;border-top:0">
+             <span style="color:#9aa0a6;font-size:11px">Stream:</span>
+             <select id="stream-${c.host}" style="font-size:11px;padding:2px 6px">
+               <option value="">Click Discover</option>
+             </select>
+             <button onclick="discoverProfiles('${c.host}')" style="font-size:11px;padding:2px 8px;margin-left:4px">Discover</button>
+             <button onclick="applyProfile('${c.host}')" style="font-size:11px;padding:2px 8px;margin-left:2px">Apply</button>
+             <span id="stream-msg-${c.host}" style="font-size:11px;margin-left:6px"></span>
+           </td></tr>`
+        : '';
       const hintRow = c.hint === 'needs_onvif_admin'
         ? `<tr><td colspan="6" style="padding:4px 6px 8px 22px;color:#f0c674;font-size:11px;border-top:0">
              &#9888; ONVIF event subscription rejected with <code>ter:NotAuthorized</code>.
@@ -447,7 +465,7 @@ async function loadCameraHealth(){
         <td style="padding:4px 6px">${c.hint === 'needs_onvif_admin'
             ? '<span class="pill red">auth</span>'
             : pillFor(age)}</td>
-      </tr>${hintRow}`;
+      </tr>${streamRow}${hintRow}`;
     }).join('');
   } catch (e) {
     document.getElementById('camhealth-body').innerHTML =
@@ -503,6 +521,49 @@ async function loadRecentEvents(){
   }
 }
 
+async function discoverProfiles(ip){
+  const msgEl = document.getElementById('stream-msg-'+ip);
+  msgEl.textContent = 'Discovering…';
+  msgEl.style.color = '#9aa0a6';
+  try {
+    const r = captureCsrf(await fetch('api/camera_profiles?ip='+encodeURIComponent(ip)));
+    const profiles = await r.json();
+    const sel = document.getElementById('stream-'+ip);
+    sel.innerHTML = '';
+    if (!profiles.length){
+      sel.innerHTML = '<option value="">No profiles found</option>';
+      msgEl.textContent = 'No profiles returned.';
+      msgEl.style.color = '#e0a0a0';
+      return;
+    }
+    for (const p of profiles){
+      const o = document.createElement('option');
+      o.value = JSON.stringify(p);
+      o.textContent = p.token + ' — ' + p.width + '×' + p.height + ' ' + p.encoding;
+      if (p.active) o.selected = true;
+      sel.appendChild(o);
+    }
+    msgEl.textContent = profiles.length + ' profile(s) found.';
+    msgEl.style.color = '#a0e0a0';
+  } catch(e){
+    msgEl.textContent = 'Error: '+e;
+    msgEl.style.color = '#e0a0a0';
+  }
+}
+async function applyProfile(ip){
+  const sel = document.getElementById('stream-'+ip);
+  const msgEl = document.getElementById('stream-msg-'+ip);
+  if (!sel.value){ msgEl.textContent='Select a profile first.'; msgEl.style.color='#e0c290'; return; }
+  const p = JSON.parse(sel.value);
+  msgEl.textContent = 'Applying…';
+  msgEl.style.color = '#9aa0a6';
+  const r = await post('api/camera_profile', {
+    ip: ip, token: p.token,
+    rtsp_url: p.rtsp_url, snapshot_url: p.snapshot_url
+  });
+  msgEl.textContent = r.text;
+  msgEl.style.color = r.ok ? '#a0e0a0' : '#e0a0a0';
+}
 fetchStatus();
 loadFirstPartyCameras();
 loadConfig();
@@ -671,6 +732,243 @@ bool json_bool_field(const std::string& body,
   if (body.compare(p + 1, 4, "true") == 0) return true;
   if (body.compare(p + 1, 5, "false") == 0) return false;
   return default_val;
+}
+
+// ---------------------------------------------------------------------------
+// Minimal ONVIF SOAP helpers for profile discovery (self-contained;
+// onvif_listener.cpp's versions are file-local and not exposed).
+// ---------------------------------------------------------------------------
+
+static std::string onvif_base64(const unsigned char* d, size_t len) {
+  static const char B[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string out;
+  out.reserve(((len + 2) / 3) * 4);
+  for (size_t i = 0; i < len; i += 3) {
+    unsigned char b0 = d[i];
+    unsigned char b1 = (i + 1 < len) ? d[i+1] : 0;
+    unsigned char b2 = (i + 2 < len) ? d[i+2] : 0;
+    out += B[b0 >> 2];
+    out += B[((b0 & 0x03) << 4) | (b1 >> 4)];
+    out += (i + 1 < len) ? B[((b1 & 0x0f) << 2) | (b2 >> 6)] : '=';
+    out += (i + 2 < len) ? B[b2 & 0x3f] : '=';
+  }
+  return out;
+}
+
+static std::string onvif_build_soap(
+    const std::string& user, const std::string& pass,
+    const std::string& body_xml,
+    const std::string& url, const std::string& action) {
+  unsigned char nonce[16];
+  RAND_bytes(nonce, sizeof(nonce));
+  std::time_t t = std::time(nullptr);
+  std::tm tm{};
+  gmtime_r(&t, &tm);
+  char created[32];
+  std::strftime(created, sizeof(created), "%Y-%m-%dT%H:%M:%SZ", &tm);
+  std::string nonce_b64 = onvif_base64(nonce, 16);
+  std::vector<unsigned char> pre;
+  pre.insert(pre.end(), nonce, nonce + 16);
+  pre.insert(pre.end(), created, created + std::strlen(created));
+  pre.insert(pre.end(), pass.begin(), pass.end());
+  unsigned char hash[EVP_MAX_MD_SIZE];
+  unsigned int hlen = 0;
+  EVP_Digest(pre.data(), pre.size(), hash, &hlen, EVP_sha1(), nullptr);
+  std::string digest = onvif_base64(hash, hlen);
+  std::ostringstream s;
+  s << "<?xml version=\"1.0\"?>\n"
+    "<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\"\n"
+    "  xmlns:wsse=\"http://docs.oasis-open.org/wss/2004/01/"
+    "oasis-200401-wss-wssecurity-secext-1.0.xsd\"\n"
+    "  xmlns:wsu=\"http://docs.oasis-open.org/wss/2004/01/"
+    "oasis-200401-wss-wssecurity-utility-1.0.xsd\"\n"
+    "  xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\"\n"
+    "  xmlns:tt=\"http://www.onvif.org/ver10/schema\"\n"
+    "  xmlns:wsa5=\"http://www.w3.org/2005/08/addressing\">\n"
+    "<s:Header><wsse:Security s:mustUnderstand=\"true\">\n"
+    "<wsse:UsernameToken><wsse:Username>" << user
+    << "</wsse:Username>\n"
+    "<wsse:Password Type=\"http://docs.oasis-open.org/wss/2004/01/"
+    "oasis-200401-wss-username-token-profile-1.0#PasswordDigest\">"
+    << digest << "</wsse:Password>\n"
+    "<wsse:Nonce EncodingType=\"http://docs.oasis-open.org/wss/2004/01/"
+    "oasis-200401-wss-soap-message-security-1.0#Base64Binary\">"
+    << nonce_b64 << "</wsse:Nonce>\n"
+    "<wsu:Created>" << created << "</wsu:Created>\n"
+    "</wsse:UsernameToken></wsse:Security>\n";
+  if (!url.empty())
+    s << "<wsa5:To>" << url << "</wsa5:To>\n";
+  if (!action.empty())
+    s << "<wsa5:Action>" << action << "</wsa5:Action>\n";
+  s << "</s:Header><s:Body>\n" << body_xml
+    << "</s:Body></s:Envelope>\n";
+  return s.str();
+}
+
+static std::string onvif_soap_post(const std::string& url,
+                                    const std::string& body) {
+  CURL* c = curl_easy_init();
+  if (!c) return {};
+  std::string resp;
+  struct curl_slist* hdrs = nullptr;
+  hdrs = curl_slist_append(hdrs,
+      "Content-Type: application/soap+xml; charset=utf-8");
+  curl_easy_setopt(c, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(c, CURLOPT_POSTFIELDS, body.c_str());
+  curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
+  curl_easy_setopt(c, CURLOPT_WRITEFUNCTION,
+      +[](char* p, size_t s, size_t n, void* ud) -> size_t {
+        static_cast<std::string*>(ud)->append(p, s * n);
+        return s * n;
+      });
+  curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
+  curl_easy_setopt(c, CURLOPT_TIMEOUT, 10L);  // NOLINT(runtime/int)
+  curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 5L);  // NOLINT(runtime/int)
+  CURLcode rc = curl_easy_perform(c);
+  curl_slist_free_all(hdrs);
+  long code = 0;  // NOLINT(runtime/int)
+  if (rc == CURLE_OK)
+    curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
+  curl_easy_cleanup(c);
+  return (rc == CURLE_OK && code == 200) ? resp : std::string();
+}
+
+// Tiny XPath text extractor for ONVIF responses.
+static std::string onvif_xpath_text(const std::string& xml,
+                                     const std::string& expr) {
+  xmlDocPtr doc = xmlReadMemory(xml.c_str(),
+      static_cast<int>(xml.size()), nullptr, nullptr,
+      XML_PARSE_RECOVER | XML_PARSE_NOERROR | XML_PARSE_NOWARNING);
+  if (!doc) return {};
+  xmlXPathContextPtr ctx = xmlXPathNewContext(doc);
+  xmlXPathRegisterNs(ctx, BAD_CAST "trt",
+      BAD_CAST "http://www.onvif.org/ver10/media/wsdl");
+  xmlXPathRegisterNs(ctx, BAD_CAST "tt",
+      BAD_CAST "http://www.onvif.org/ver10/schema");
+  xmlXPathObjectPtr obj = xmlXPathEvalExpression(
+      reinterpret_cast<const xmlChar*>(expr.c_str()), ctx);
+  std::string result;
+  if (obj && obj->type == XPATH_NODESET &&
+      obj->nodesetval && obj->nodesetval->nodeNr > 0) {
+    xmlChar* c = xmlNodeGetContent(obj->nodesetval->nodeTab[0]);
+    if (c) { result = reinterpret_cast<char*>(c); xmlFree(c); }
+  }
+  if (obj) xmlXPathFreeObject(obj);
+  xmlXPathFreeContext(ctx);
+  xmlFreeDoc(doc);
+  return result;
+}
+
+// Discover ONVIF profiles from a camera.  Returns JSON array string.
+static std::string discover_camera_profiles(
+    const std::string& ip, const std::string& user,
+    const std::string& pass, const std::string& active_token) {
+  const std::string media_url = "http://" + ip + "/onvif/media_service";
+  const std::string action =
+      "http://www.onvif.org/ver10/media/wsdl/GetProfiles";
+  std::string soap = onvif_build_soap(user, pass,
+      "<trt:GetProfiles/>\n", media_url, action);
+  std::string resp = onvif_soap_post(media_url, soap);
+  if (resp.empty()) return "[]";
+
+  // Parse all Profiles from the response.
+  xmlDocPtr doc = xmlReadMemory(resp.c_str(),
+      static_cast<int>(resp.size()), nullptr, nullptr,
+      XML_PARSE_RECOVER | XML_PARSE_NOERROR | XML_PARSE_NOWARNING);
+  if (!doc) return "[]";
+  xmlXPathContextPtr ctx = xmlXPathNewContext(doc);
+  xmlXPathRegisterNs(ctx, BAD_CAST "trt",
+      BAD_CAST "http://www.onvif.org/ver10/media/wsdl");
+  xmlXPathRegisterNs(ctx, BAD_CAST "tt",
+      BAD_CAST "http://www.onvif.org/ver10/schema");
+  xmlXPathObjectPtr profiles = xmlXPathEvalExpression(
+      BAD_CAST "//*[local-name()='Profiles']", ctx);
+
+  std::string json = "[";
+  if (profiles && profiles->nodesetval) {
+    for (int i = 0; i < profiles->nodesetval->nodeNr; ++i) {
+      xmlNodePtr node = profiles->nodesetval->nodeTab[i];
+      xmlChar* tok = xmlGetProp(node, BAD_CAST "token");
+      if (!tok) continue;
+      std::string token(reinterpret_cast<char*>(tok));
+      xmlFree(tok);
+
+      // Extract name, resolution, encoding via sub-XPath.
+      auto sub_text = [&](const char* sub_expr) -> std::string {
+        xmlXPathObjectPtr o = xmlXPathNodeEval(node,
+            reinterpret_cast<const xmlChar*>(sub_expr), ctx);
+        std::string val;
+        if (o && o->nodesetval && o->nodesetval->nodeNr > 0) {
+          xmlChar* c = xmlNodeGetContent(o->nodesetval->nodeTab[0]);
+          if (c) { val = reinterpret_cast<char*>(c); xmlFree(c); }
+        }
+        if (o) xmlXPathFreeObject(o);
+        return val;
+      };
+      std::string name = token;  // use token as display name
+      std::string w = sub_text(
+          ".//*[local-name()='VideoEncoderConfiguration']"
+          "/*[local-name()='Resolution']/*[local-name()='Width']");
+      std::string h = sub_text(
+          ".//*[local-name()='VideoEncoderConfiguration']"
+          "/*[local-name()='Resolution']/*[local-name()='Height']");
+      std::string enc = sub_text(
+          ".//*[local-name()='VideoEncoderConfiguration']"
+          "/*[local-name()='Encoding']");
+
+      // GetStreamUri for this profile.
+      std::string rtsp_uri;
+      {
+        std::string body =
+            "<trt:GetStreamUri>\n"
+            "<trt:StreamSetup><tt:Stream>RTP-Unicast</tt:Stream>\n"
+            "<tt:Transport><tt:Protocol>RTSP</tt:Protocol>\n"
+            "</tt:Transport></trt:StreamSetup>\n"
+            "<trt:ProfileToken>" + token + "</trt:ProfileToken>\n"
+            "</trt:GetStreamUri>\n";
+        std::string s2 = onvif_build_soap(user, pass, body,
+            media_url,
+            "http://www.onvif.org/ver10/media/wsdl/GetStreamUri");
+        std::string r2 = onvif_soap_post(media_url, s2);
+        if (!r2.empty())
+          rtsp_uri = onvif_xpath_text(r2,
+              "//*[local-name()='Uri']");
+      }
+
+      // GetSnapshotUri for this profile.
+      std::string snap_uri;
+      {
+        std::string body =
+            "<trt:GetSnapshotUri>\n"
+            "<trt:ProfileToken>" + token + "</trt:ProfileToken>\n"
+            "</trt:GetSnapshotUri>\n";
+        std::string s3 = onvif_build_soap(user, pass, body,
+            media_url,
+            "http://www.onvif.org/ver10/media/wsdl/GetSnapshotUri");
+        std::string r3 = onvif_soap_post(media_url, s3);
+        if (!r3.empty())
+          snap_uri = onvif_xpath_text(r3,
+              "//*[local-name()='Uri']");
+      }
+
+      bool active = (token == active_token);
+      if (i > 0) json += ",";
+      json += "{\"token\":\"" + token + "\","
+          "\"name\":\"" + name + "\","
+          "\"width\":" + (w.empty() ? "0" : w) + ","
+          "\"height\":" + (h.empty() ? "0" : h) + ","
+          "\"encoding\":\"" + enc + "\","
+          "\"rtsp_url\":\"" + rtsp_uri + "\","
+          "\"snapshot_url\":\"" + snap_uri + "\","
+          "\"active\":" + (active ? "true" : "false") + "}";
+    }
+  }
+  json += "]";
+  if (profiles) xmlXPathFreeObject(profiles);
+  xmlXPathFreeContext(ctx);
+  xmlFreeDoc(doc);
+  return json;
 }
 
 // Per-connection context for accumulating POST bodies across libmicrohttpd's
@@ -1198,6 +1496,67 @@ std::string read_file_binary(const std::string& path) {
   return ss.str();
 }
 
+// Handle GET /api/camera_profiles?ip=X — discover ONVIF profiles.
+std::string handle_camera_profiles(const Ctx& ctx, const char* ip_param) {
+  if (!ip_param || ip_param[0] == '\0' || !ctx.db)
+    return "[]";
+  auto cams_or = unifi::load_cameras(*ctx.db);
+  if (!cams_or.ok()) return "[]";
+  for (const auto& cam : *cams_or) {
+    if (cam.ip == ip_param) {
+      return discover_camera_profiles(
+          cam.ip, cam.user, cam.password, "");
+    }
+  }
+  return "[]";
+}
+
+// Handle POST /api/camera_profile — update Protect DB with selected stream.
+std::pair<int, std::string> handle_set_camera_profile(
+    const Ctx& ctx, const std::string& body) {
+  if (!ctx.db) return {500, "no database configured"};
+  const std::string ip = json_string_field(body, "ip");
+  const std::string token = json_string_field(body, "token");
+  const std::string rtsp = json_string_field(body, "rtsp_url");
+  const std::string snap = json_string_field(body, "snapshot_url");
+  if (ip.empty() || token.empty())
+    return {400, "ip and token are required"};
+  std::string connstr = "host=" + std::string(ctx.db->host);
+  connstr += " port=" + std::to_string(ctx.db->port);
+  connstr += " dbname=" + ctx.db->dbname;
+  connstr += " user=" + ctx.db->user;
+  if (!ctx.db->password.empty())
+    connstr += " password=" + ctx.db->password;
+  PGconn* conn = PQconnectdb(connstr.c_str());
+  if (PQstatus(conn) != CONNECTION_OK) {
+    std::string err = PQerrorMessage(conn);
+    PQfinish(conn);
+    return {500, "DB connect failed: " + err};
+  }
+  const char* params[4] = {
+    rtsp.c_str(), snap.c_str(), token.c_str(), ip.c_str()
+  };
+  PGresult* res = PQexecParams(conn,
+      "UPDATE cameras SET "
+      "\"thirdPartyCameraInfo\" = "
+      "jsonb_set(jsonb_set(jsonb_set("
+      "\"thirdPartyCameraInfo\"::jsonb, "
+      "'{rtspUrl}', to_jsonb($1::text)), "
+      "'{snapshotUrl}', to_jsonb($2::text)), "
+      "'{profileToken}', to_jsonb($3::text)) "
+      "WHERE host = $4",
+      4, nullptr, params, nullptr, nullptr, 0);
+  bool ok = PQresultStatus(res) == PGRES_COMMAND_OK;
+  std::string err_msg;
+  if (!ok) err_msg = PQresultErrorMessage(res);
+  PQclear(res);
+  PQfinish(conn);
+  if (!ok) return {500, "DB update failed: " + err_msg};
+  LOG(INFO) << "[admin] updated stream profile for " << ip
+            << " to " << token;
+  return {200, "Stream updated. Camera will reconnect within ~2 minutes."};
+}
+
 // Handle POST /api/uninstall — fire apt-get remove in the background.
 std::pair<int, std::string> handle_uninstall() {
   // Detach: the running process is about to be stopped by apt-get.
@@ -1267,6 +1626,12 @@ MHD_Result handler(
   } else if (is_get &&
              std::strcmp(url, "/api/camera_health") == 0) {
     body = build_camera_health_json(*ctx);
+    content_type = "application/json";
+  } else if (is_get &&
+             std::strncmp(url, "/api/camera_profiles", 20) == 0) {
+    const char* ip_param = MHD_lookup_connection_value(
+        connection, MHD_GET_ARGUMENT_KIND, "ip");
+    body = handle_camera_profiles(*ctx, ip_param);
     content_type = "application/json";
   } else if (is_get &&
              std::strcmp(url, "/api/recent_events") == 0) {
@@ -1356,6 +1721,8 @@ MHD_Result handler(
       r = handle_refresh_apt(*ctx);
     else if (std::strcmp(url, "/api/autoupdate") == 0)
       r = handle_autoupdate(pb);
+    else if (std::strcmp(url, "/api/camera_profile") == 0)
+      r = handle_set_camera_profile(*ctx, pb);
     else if (std::strcmp(url, "/api/config") == 0)
       r = handle_config(*ctx, pb);
     else if (std::strcmp(url, "/api/uninstall") == 0)
