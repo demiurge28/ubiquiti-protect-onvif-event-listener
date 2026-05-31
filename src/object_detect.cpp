@@ -47,8 +47,8 @@ namespace object_detect {
 struct ObjectDetector::Impl {
 #ifdef WITH_NCNN
   ncnn::Net net;
-  int input_w = 320;
-  int input_h = 320;
+  int input_w = 416;
+  int input_h = 416;
 #endif  // WITH_NCNN
 };
 
@@ -84,41 +84,47 @@ static void softmax_inplace(float* data, int n) {
   for (int i = 0; i < n; ++i) data[i] /= sum;
 }
 
-// reg_max_1 = 8 for nanodet_m (reg_max=7, so reg_max_1 = 7+1 = 8).
+// reg_max_1 = 8 for NanoDet-Plus (reg_max=7, so reg_max_1 = 7+1 = 8).
 static constexpr int kRegMaxP1 = 8;
+static constexpr int kNumClass = 80;
 
-static void generate_proposals(const ncnn::Mat& cls_pred,
-                                const ncnn::Mat& dis_pred,
-                                int stride,
-                                int pad_w, int pad_h,
-                                float prob_threshold,
-                                std::vector<Det>& dets) {
+// NanoDet-Plus combined-output proposal generator.
+// The model produces a single concatenated output with shape (N, 112) where
+// 112 = 80 (class scores, already sigmoid'd) + 32 (4 * reg_max_1 distance).
+// We split the strides from the flat grid by walking through them in order.
+static void generate_proposals_plus(
+    const ncnn::Mat& pred, int stride,
+    int pad_w, int pad_h,
+    float prob_threshold,
+    int& row_offset,
+    std::vector<Det>& dets) {
   const int num_grid_x = pad_w / stride;
   const int num_grid_y = pad_h / stride;
-  const int num_class  = cls_pred.w;
+  const int num_grid   = num_grid_x * num_grid_y;
 
   for (int i = 0; i < num_grid_y; ++i) {
     for (int j = 0; j < num_grid_x; ++j) {
-      const int idx = i * num_grid_x + j;
-      const float* scores = cls_pred.row(idx);
+      const int idx = row_offset + i * num_grid_x + j;
+      const float* row_ptr = pred.row(idx);
 
+      // First kNumClass values are sigmoid'd class scores.
       int   label = -1;
       float score = -1.0e9f;
-      for (int k = 0; k < num_class; ++k) {
-        if (scores[k] > score) {
+      for (int k = 0; k < kNumClass; ++k) {
+        if (row_ptr[k] > score) {
           label = k;
-          score = scores[k];
+          score = row_ptr[k];
         }
       }
       if (score < prob_threshold) continue;
 
-      // Decode distance predictions with softmax + weighted sum.
+      // Remaining 4 * kRegMaxP1 values are distance distributions.
+      const float* dis_ptr = row_ptr + kNumClass;
       float ltrb[4] = {};
       for (int k = 0; k < 4; ++k) {
         float buf[kRegMaxP1];
-        const float* row_ptr = dis_pred.row(idx);
         for (int r = 0; r < kRegMaxP1; ++r)
-          buf[r] = row_ptr[k * kRegMaxP1 + r];
+          buf[r] = dis_ptr[k * kRegMaxP1 + r];
         softmax_inplace(buf, kRegMaxP1);
         float dis = 0.0f;
         for (int r = 0; r < kRegMaxP1; ++r)
@@ -139,6 +145,7 @@ static void generate_proposals(const ncnn::Mat& cls_pred,
       dets.push_back({x0, y0, x1 - x0, y1 - y0, score, label});
     }
   }
+  row_offset += num_grid;
 }
 
 static float iou(const Det& a, const Det& b) {
@@ -227,7 +234,7 @@ absl::StatusOr<std::unique_ptr<ObjectDetector>> ObjectDetector::Load(
                << bin_path;
     return absl::InternalError("object_detect: cannot load bin: " + bin_path);
   }
-  LOG(INFO) << "[detect] NanoDet-M model loaded ("
+  LOG(INFO) << "[detect] NanoDet-Plus-m model loaded ("
             << param_path << " + " << bin_path << ")";
 
   return obj;
@@ -310,7 +317,7 @@ std::vector<Detection> ObjectDetector::detect(
   const int hpad     = target_h - scaled_h;
 
   // ---- Resize + pad with NCNN letterbox -----------------------------------
-  // Use PIXEL_RGB2BGR so nanodet_m gets BGR (trained on BGR/OpenCV images).
+  // NanoDet-Plus expects BGR input (trained on BGR/OpenCV images).
   ncnn::Mat in = ncnn::Mat::from_pixels_resize(
       pixels.data(), ncnn::Mat::PIXEL_RGB2BGR,
       orig_w, orig_h, scaled_w, scaled_h);
@@ -328,30 +335,25 @@ std::vector<Detection> ObjectDetector::detect(
 
   // ---- Run inference ------------------------------------------------------
   ncnn::Extractor ex = impl_->net.create_extractor();
-  ex.input("input.1", in_pad);
+  ex.input("data", in_pad);
 
-  ncnn::Mat cls_stride8,  dis_stride8;
-  ncnn::Mat cls_stride16, dis_stride16;
-  ncnn::Mat cls_stride32, dis_stride32;
-
-  ex.extract("792", cls_stride8);
-  ex.extract("795", dis_stride8);
-  ex.extract("814", cls_stride16);
-  ex.extract("817", dis_stride16);
-  ex.extract("836", cls_stride32);
-  ex.extract("839", dis_stride32);
+  ncnn::Mat pred;
+  ex.extract("output", pred);
 
   // ---- Decode proposals ---------------------------------------------------
+  // NanoDet-Plus output: single tensor (num_grids, 112) where
+  // 112 = 80 sigmoid'd class scores + 32 distance distributions (4 * 8).
+  // Strides {8, 16, 32, 64} — grids are concatenated in order.
   static constexpr float kProbThreshold = 0.35f;
   static constexpr float kNmsThreshold  = 0.5f;
 
   std::vector<Det> dets;
-  generate_proposals(cls_stride8,  dis_stride8,  8,
-                     target_w, target_h, kProbThreshold, dets);
-  generate_proposals(cls_stride16, dis_stride16, 16,
-                     target_w, target_h, kProbThreshold, dets);
-  generate_proposals(cls_stride32, dis_stride32, 32,
-                     target_w, target_h, kProbThreshold, dets);
+  int row_offset = 0;
+  for (int stride : {8, 16, 32, 64}) {
+    generate_proposals_plus(pred, stride,
+                            target_w, target_h, kProbThreshold,
+                            row_offset, dets);
+  }
 
   nms_inplace(dets, kNmsThreshold);
 
@@ -398,8 +400,11 @@ std::vector<Detection> ObjectDetector::detect(
 
 namespace {
 
-// NOLINTNEXTLINE(whitespace/line_length)
-constexpr const char kModelUrlBase[] = "https://github.com/nihui/ncnn-assets/raw/refs/heads/master/models/";
+// NanoDet-Plus-m 416 model hosted on the project's GitHub releases.
+constexpr const char kModelUrlBase[] =  // NOLINT(whitespace/line_length)
+    "https://github.com/demiurge28/"
+    "ubiquiti-protect-onvif-event-listener/"
+    "releases/download/v1.8.2/";
 
 size_t file_write_cb(char* ptr, size_t size, size_t nmemb, void* userdata) {
   auto* f = static_cast<std::FILE*>(userdata);
@@ -437,22 +442,24 @@ bool download_file(const std::string& url, const std::string& path) {
 
 bool ObjectDetector::EnsureModels(const std::string& model_dir) {
   (void)mkdir(model_dir.c_str(), 0755);
-  const std::string param = model_dir + "/nanodet_m.param";
-  const std::string bin   = model_dir + "/nanodet_m.bin";
+  const std::string param = model_dir + "/nanodet-plus-m_416.param";
+  const std::string bin   = model_dir + "/nanodet-plus-m_416.bin";
 
   const bool need_param = !std::ifstream(param).good();
   const bool need_bin   = !std::ifstream(bin).good();
   if (!need_param && !need_bin) return true;
 
-  LOG(INFO) << "[detect] downloading NanoDet-M models to " << model_dir;
+  LOG(INFO) << "[detect] downloading NanoDet-Plus-m models to " << model_dir;
   if (need_param &&
-      !download_file(std::string(kModelUrlBase) + "nanodet_m.param", param)) {
-    LOG(ERROR) << "[detect] failed to download nanodet_m.param";
+      !download_file(std::string(kModelUrlBase) +
+                     "nanodet-plus-m_416.param", param)) {
+    LOG(ERROR) << "[detect] failed to download nanodet-plus-m_416.param";
     return false;
   }
   if (need_bin &&
-      !download_file(std::string(kModelUrlBase) + "nanodet_m.bin", bin)) {
-    LOG(ERROR) << "[detect] failed to download nanodet_m.bin";
+      !download_file(std::string(kModelUrlBase) +
+                     "nanodet-plus-m_416.bin", bin)) {
+    LOG(ERROR) << "[detect] failed to download nanodet-plus-m_416.bin";
     return false;
   }
   LOG(INFO) << "[detect] model download complete";

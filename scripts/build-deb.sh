@@ -78,10 +78,12 @@ fi
 # ---------------------------------------------------------------------------
 MODEL_PARAM=""
 MODEL_BIN=""
-for candidate in "$SCRIPT_DIR/nanodet_m.param" "$HOME/models/nanodet_m.param"; do
+for candidate in "$SCRIPT_DIR/nanodet-plus-m_416.param" "$HOME/models/nanodet-plus-m_416.param" \
+                 "$SCRIPT_DIR/nanodet_m.param" "$HOME/models/nanodet_m.param"; do
     if [ -f "$candidate" ]; then MODEL_PARAM="$candidate"; break; fi
 done
-for candidate in "$SCRIPT_DIR/nanodet_m.bin" "$HOME/models/nanodet_m.bin"; do
+for candidate in "$SCRIPT_DIR/nanodet-plus-m_416.bin" "$HOME/models/nanodet-plus-m_416.bin" \
+                 "$SCRIPT_DIR/nanodet_m.bin" "$HOME/models/nanodet_m.bin"; do
     if [ -f "$candidate" ]; then MODEL_BIN="$candidate"; break; fi
 done
 
@@ -139,12 +141,11 @@ chmod 0644 "$STAGE/etc/onvif-recorder/channel"
 
 # Model files (optional)
 if [ -n "$MODEL_PARAM" ] && [ -n "$MODEL_BIN" ]; then
-    install -m 0644 "$MODEL_PARAM" "$STAGE/usr/share/onvif-recorder/models/nanodet_m.param"
-    install -m 0644 "$MODEL_BIN"   "$STAGE/usr/share/onvif-recorder/models/nanodet_m.bin"
+    install -m 0644 "$MODEL_PARAM" "$STAGE/usr/share/onvif-recorder/models/nanodet-plus-m_416.param"
+    install -m 0644 "$MODEL_BIN"   "$STAGE/usr/share/onvif-recorder/models/nanodet-plus-m_416.bin"
 else
-    echo "warning: NanoDet-M model files not found; package will not ship models." >&2
-    echo "  Download with: curl -L -o nanodet_m.param https://github.com/nihui/ncnn-assets/raw/refs/heads/master/models/nanodet_m.param" >&2
-    echo "  and:           curl -L -o nanodet_m.bin   https://github.com/nihui/ncnn-assets/raw/refs/heads/master/models/nanodet_m.bin" >&2
+    echo "warning: NanoDet-Plus-m model files not found; package will not ship models." >&2
+    echo "  Models will be auto-downloaded on first run." >&2
 fi
 
 # Docs
