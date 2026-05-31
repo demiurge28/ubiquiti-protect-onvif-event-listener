@@ -1419,8 +1419,10 @@ void DetectionRecorder::on_event(const OnvifEvent& ev) {
           const jpeg_crop::BoundingBox* onvif_bbox =
               (ev.bbox && !det_override) ? &*ev.bbox : nullptr;
           std::optional<object_detect::Detection> det_result;
-          if (det_ptr && (!onvif_bbox || det_override))
-            det_result = det_ptr->detect(snapshot);
+          if (det_ptr && (!onvif_bbox || det_override)) {
+            auto all_dets = det_ptr->detect(snapshot);
+            det_result = object_detect::best_detection(all_dets);
+          }
           const jpeg_crop::BoundingBox* det_bbox =
               det_result ? &det_result->bbox : nullptr;
           if (onvif_bbox) {

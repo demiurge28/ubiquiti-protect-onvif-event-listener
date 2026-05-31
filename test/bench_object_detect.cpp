@@ -88,12 +88,15 @@ int main(int argc, char* argv[]) {
 
   // Warm-up run.
   {
-    auto result = det->detect(input);
-    if (result) {
+    auto results = det->detect(input);
+    if (!results.empty()) {
       std::fprintf(stderr,
-                   "Warmup detection: bbox=(%.3f, %.3f, %.3f, %.3f) class=%d\n",
-                   result->bbox.x, result->bbox.y,
-                   result->bbox.w, result->bbox.h, result->class_id);
+                   "Warmup: %zu detection(s), best: "
+                   "bbox=(%.3f, %.3f, %.3f, %.3f) class=%d\n",
+                   results.size(),
+                   results[0].bbox.x, results[0].bbox.y,
+                   results[0].bbox.w, results[0].bbox.h,
+                   results[0].class_id);
     } else {
       std::fprintf(stderr, "Warmup: no security-relevant detection\n");
     }
