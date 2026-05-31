@@ -23,7 +23,7 @@
 # dead channel that would 404 on apt-get update.
 set -e
 
-REPO_URL="${ONVIF_REPO_URL:-https://danielwoz.github.io/ubiquiti-protect-onvif-event-listener}"
+REPO_URL="${ONVIF_REPO_URL:-https://demiurge28.github.io/ubiquiti-protect-onvif-event-listener}"
 CHANNEL_FILE=/etc/onvif-recorder/channel
 PINNED_FILE=/etc/onvif-recorder/channel.pinned
 RUNNABLES=${ONVIF_RUNNABLES_YAML:-/data/unifi-core/config/runnables.yaml}

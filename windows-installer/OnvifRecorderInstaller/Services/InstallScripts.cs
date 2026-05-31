@@ -5,7 +5,7 @@ namespace OnvifRecorderInstaller.Services;
 
 public static class InstallScripts {
     public const string RepoUrl =
-        "https://danielwoz.github.io/ubiquiti-protect-onvif-event-listener";
+        "https://demiurge28.github.io/ubiquiti-protect-onvif-event-listener";
     public const string Keyring =
         "/usr/share/keyrings/onvif-recorder-archive-keyring.gpg";
     public const string SourcesFile =

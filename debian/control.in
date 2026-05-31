@@ -3,10 +3,10 @@ Version: @VERSION@
 Section: net
 Priority: optional
 Architecture: @ARCH@
-Maintainer: Daniel Williams <danielwoz@gmail.com>
+Maintainer: Daniel Williams <demiurge28@users.noreply.github.com>
 Depends: libc6, systemd, adduser, procps
 Recommends: unifi-protect
-Homepage: https://github.com/danielwoz/ubiquiti-protect-onvif-event-listener
+Homepage: https://github.com/demiurge28/ubiquiti-protect-onvif-event-listener
 Description: ONVIF event recorder for UniFi Protect
  Subscribes to ONVIF cameras, parses their motion/smart-detect events, and
  records detection intervals into the UniFi Protect PostgreSQL database so

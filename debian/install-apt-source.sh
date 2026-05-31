@@ -6,7 +6,7 @@ set -e
 CHANNEL_FILE=/etc/onvif-recorder/channel
 SRC_FILE=/etc/apt/sources.list.d/onvif-recorder.list
 KEYRING=/usr/share/keyrings/onvif-recorder-archive-keyring.gpg
-REPO_URL=${ONVIF_REPO_URL:-https://danielwoz.github.io/ubiquiti-protect-onvif-event-listener}
+REPO_URL=${ONVIF_REPO_URL:-https://demiurge28.github.io/ubiquiti-protect-onvif-event-listener}
 
 CHANNEL=$(cat "$CHANNEL_FILE" 2>/dev/null | tr -d '[:space:]')
 [ -n "$CHANNEL" ] || CHANNEL=stable

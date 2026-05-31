@@ -158,11 +158,11 @@ fi
 cat > "$STAGE/usr/share/doc/onvif-recorder/copyright" <<'COPYRIGHT'
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: onvif-recorder
-Upstream-Contact: Daniel Williams <danielwoz@gmail.com>
-Source: https://github.com/danielwoz/ubiquiti-protect-onvif-event-listener
+Upstream-Contact: Daniel Williams <demiurge28@users.noreply.github.com>
+Source: https://github.com/demiurge28/ubiquiti-protect-onvif-event-listener
 
 Files: *
-Copyright: 2025-2026 Daniel Williams <danielwoz@gmail.com>
+Copyright: 2025-2026 Daniel Williams <demiurge28@users.noreply.github.com>
 License: Apache-2.0
  On Debian systems, the full text of the Apache-2.0 license can be found
  in /usr/share/common-licenses/Apache-2.0.
@@ -174,10 +174,10 @@ chmod 0644 "$STAGE/usr/share/doc/onvif-recorder/copyright"
 cat > "$STAGE/usr/share/doc/onvif-recorder/changelog.Debian" <<CHANGELOG
 onvif-recorder ($VERSION) unstable; urgency=medium
 
-  * See https://github.com/danielwoz/ubiquiti-protect-onvif-event-listener/releases
+  * See https://github.com/demiurge28/ubiquiti-protect-onvif-event-listener/releases
     for the full release history.
 
- -- Daniel Williams <danielwoz@gmail.com>  $(LC_ALL=C date -u -R)
+ -- Daniel Williams <demiurge28@users.noreply.github.com>  $(LC_ALL=C date -u -R)
 CHANGELOG
 gzip -n9 "$STAGE/usr/share/doc/onvif-recorder/changelog.Debian"
 chmod 0644 "$STAGE/usr/share/doc/onvif-recorder/changelog.Debian.gz"

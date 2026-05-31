@@ -434,7 +434,7 @@ async function loadCameraHealth(){
              &#9888; ONVIF event subscription rejected with <code>ter:NotAuthorized</code>.
              Most Hikvision firmware (and OEM rebadges) require a separate ONVIF user with
              <b>Administrator</b> privileges -- web-UI admin alone is not enough.
-             See <a href="https://github.com/danielwoz/ubiquiti-protect-onvif-event-listener/issues/20"
+             See <a href="https://github.com/demiurge28/ubiquiti-protect-onvif-event-listener/issues/20"
                    target="_blank" rel="noopener" style="color:#f0c674">issue #20</a> for the fix.
            </td></tr>`
         : '';

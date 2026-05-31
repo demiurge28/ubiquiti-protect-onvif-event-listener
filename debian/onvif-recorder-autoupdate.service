@@ -1,6 +1,6 @@
 [Unit]
 Description=Auto-install onvif-recorder updates
-Documentation=https://github.com/danielwoz/ubiquiti-protect-onvif-event-listener
+Documentation=https://github.com/demiurge28/ubiquiti-protect-onvif-event-listener
 After=network-online.target
 Wants=network-online.target
 

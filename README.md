@@ -13,7 +13,7 @@ AI** (e.g. G3 Instant). See [First-party camera support](#first-party-camera-sup
 
 ## Fork additions
 
-This fork extends the original [danielwoz/ubiquiti-protect-onvif-event-listener](https://github.com/danielwoz/ubiquiti-protect-onvif-event-listener)
+This fork extends the original [demiurge28/ubiquiti-protect-onvif-event-listener](https://github.com/demiurge28/ubiquiti-protect-onvif-event-listener)
 with the following improvements.
 
 ### Per-profile ONVIF snapshot selection and resolution discovery
@@ -304,7 +304,7 @@ systemctl restart onvif-recorder
 ### 1. Clone with submodules
 
 ```bash
-git clone --recurse-submodules https://github.com/danielwoz/ubiquiti-protect-onvif-event-listener.git
+git clone --recurse-submodules https://github.com/demiurge28/ubiquiti-protect-onvif-event-listener.git
 cd ubiquiti-protect-onvif-event-listener
 ```
 

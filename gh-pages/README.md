@@ -3,7 +3,7 @@
 This directory is a template for the contents of the `gh-pages` branch, which
 is served as an APT repository at:
 
-    https://danielwoz.github.io/ubiquiti-protect-onvif-event-listener/
+    https://demiurge28.github.io/ubiquiti-protect-onvif-event-listener/
 
 ## Bootstrap (one-time)
 

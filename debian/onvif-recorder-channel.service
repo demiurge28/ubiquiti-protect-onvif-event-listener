@@ -1,6 +1,6 @@
 [Unit]
 Description=Sync onvif-recorder APT channel with Protect release channel
-Documentation=https://github.com/danielwoz/ubiquiti-protect-onvif-event-listener
+Documentation=https://github.com/demiurge28/ubiquiti-protect-onvif-event-listener
 
 [Service]
 Type=oneshot
