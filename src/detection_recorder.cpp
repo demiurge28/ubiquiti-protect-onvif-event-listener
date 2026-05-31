@@ -1392,6 +1392,15 @@ void DetectionRecorder::on_event(const OnvifEvent& ev) {
     std::string sdt_json   = smart_detect_types_json(det->type);
     std::string obj_type   = sdo_type(det->type);
 
+    // Extra types detected in the same frame (populated by NanoDet-M
+    // inside the crop block; consumed by the step-6 loop below).
+    struct ExtraTypeDet {
+      std::string type;  // "person", "vehicle", "animal"
+      jpeg_crop::BoundingBox bbox;
+    };
+    std::vector<ExtraTypeDet> extra_types;
+    std::vector<unsigned char> snapshot_original;  // uncropped, for extra crops
+
     // 3. Fetch snapshot if the backend needs it.
     std::vector<unsigned char> snapshot;
     if (db_->needs_snapshot() && !snap_url.empty()) {
@@ -1418,9 +1427,14 @@ void DetectionRecorder::on_event(const OnvifEvent& ev) {
                     << img_w << "x" << img_h;
           const jpeg_crop::BoundingBox* onvif_bbox =
               (ev.bbox && !det_override) ? &*ev.bbox : nullptr;
+          // Run NanoDet-M and collect all detections.  The primary
+          // (highest-confidence) detection drives the main event; any
+          // additional types found in the same frame produce extra events
+          // after the primary is written (see "6. Additional types" below).
+          std::vector<object_detect::Detection> all_dets;
           std::optional<object_detect::Detection> det_result;
           if (det_ptr && (!onvif_bbox || det_override)) {
-            auto all_dets = det_ptr->detect(snapshot);
+            all_dets = det_ptr->detect(snapshot);
             det_result = object_detect::best_detection(all_dets);
           }
           const jpeg_crop::BoundingBox* det_bbox =
@@ -1458,6 +1472,29 @@ void DetectionRecorder::on_event(const OnvifEvent& ev) {
               key = real_key;
             }
           }
+          // Collect additional types detected in this frame (one per
+          // unique type, excluding the primary).  Built before cropping
+          // so we can reference the original snapshot for per-type crops.
+          if (det->from_fallback && cam_override_type.empty() &&
+              all_dets.size() > 1) {
+            std::map<std::string, const object_detect::Detection*> by_type;
+            for (const auto& d : all_dets) {
+              const std::string t =
+                  object_detect::detection_type(d.class_id);
+              auto it2 = by_type.find(t);
+              if (it2 == by_type.end() || d.confidence > it2->second->confidence)
+                by_type[t] = &d;
+            }
+            for (const auto& [t, d] : by_type) {
+              if (t != obj_type)
+                extra_types.push_back({t, d->bbox});
+            }
+          }
+
+          // Save the uncropped snapshot for additional-type crops.
+          if (!extra_types.empty())
+            snapshot_original = snapshot;
+
           // Only crop when we have a basis: an ONVIF bbox, or a loaded
           // detector (which may yield a result or fall back to smart-crop).
           // Without either, store the full uncropped image.
@@ -1710,6 +1747,123 @@ void DetectionRecorder::on_event(const OnvifEvent& ev) {
       if (webhook_notif)
         webhook_notif->notify(obj_type, ev.camera_ip, event_id, ts_ms);
     }
+
+    // 6. Additional types: create a separate event for each extra object
+    //    type found in the same snapshot (e.g. vehicle when primary was
+    //    person).  Each gets its own thumbnail cropped from the original
+    //    uncropped snapshot, its own coalesce key, and its own DB rows.
+    for (const auto& extra : extra_types) {
+      const std::string ex_obj_type = extra.type;
+      const std::string ex_sdt     = smart_detect_types_json(ex_obj_type);
+      auto ex_key = std::make_pair(ev.camera_ip, ex_obj_type);
+
+      // Coalesce check for this type.
+      std::string ex_coalesced;
+      {
+        absl::MutexLock lk(&mu_);
+        auto oit = open_.find(ex_key);
+        if (oit != open_.end()) {
+          ex_coalesced = oit->second;
+        } else {
+          uint64_t cam_coal_ms = coalesce_window_ms_;
+          auto cwit = camera_coalesce_window_ms_.find(ev.camera_ip);
+          if (cwit != camera_coalesce_window_ms_.end())
+            cam_coal_ms = cwit->second;
+          if (cam_coal_ms > 0) {
+            auto lei = last_event_.find(ex_key);
+            if (lei != last_event_.end() && lei->second.real_end_ms > 0) {
+              const uint64_t cur = util::now_ms();
+              if (cur >= lei->second.real_end_ms &&
+                  cur - lei->second.real_end_ms <= cam_coal_ms) {
+                ex_coalesced = lei->second.event_id;
+                open_[ex_key] = ex_coalesced;
+                lei->second.real_end_ms = 0;
+              }
+            }
+          }
+        }
+      }
+
+      const std::string ex_event_id =
+          ex_coalesced.empty() ? util::generate_uuid() : ex_coalesced;
+      const std::string ex_sdo_id   = util::generate_uuid();
+      const std::string ex_sdr_id   = util::generate_uuid();
+      const std::string ex_trk_id   = util::generate_uuid();
+      const std::string ex_thumb_id =
+          db_->make_thumbnail_id(ev.camera_ip, ts_ms);
+
+      // Crop thumbnail from the original snapshot.
+      std::vector<unsigned char> ex_snapshot;
+      if (!snapshot_original.empty()) {
+        auto ex_cropped = jpeg_crop::crop(snapshot_original, extra.bbox);
+        ex_snapshot = ex_cropped.empty() ? snapshot_original
+                                         : std::move(ex_cropped);
+      }
+
+      LOG(INFO) << '[' << ev.camera_ip << "] extra detection: "
+                << ex_obj_type
+                << (ex_coalesced.empty() ? " (new event)" : " (coalesced)");
+
+      const std::string ex_attr =
+          std::string("{")
+          + "\"associatedFaceTrackerID\":null,"
+          + "\"blurness\":null,\"color\":null,"
+          + "\"confidence\":0,"
+          + "\"faceEmbed\":null,\"faceLandmarks\":null,"
+          + "\"faceMask\":null,\"facePose\":null,"
+          + "\"faceVerifyStatus\":null,\"line\":null,"
+          + "\"matchedId\":null,\"matchedName\":null,"
+          + "\"namesTopK\":null,"
+          + "\"objectType\":\"" + ex_obj_type + "\","
+          + "\"personEmbedFromCamera\":null,"
+          + "\"qualityScore\":null,\"topKCandidate\":null,"
+          + "\"trackerId\":1,\"vehicleType\":null,"
+          + "\"zone\":[]}";
+
+      {
+        absl::MutexLock lk(&mu_);
+        if (ex_coalesced.empty()) {
+          db_->insert_event(ex_event_id, ts_ms, ev.camera_ip,
+                            ex_sdt, ex_thumb_id, now_str, "", "");
+          open_[ex_key] = ex_event_id;
+        }
+        db_->insert_sdo(ex_sdo_id, ex_event_id, ex_thumb_id,
+                        ev.camera_ip, ex_obj_type, ex_attr, ts_ms, now_str);
+        db_->insert_smart_detect_raw(ex_sdr_id, ev.camera_ip,
+                                     ts_ms, ex_obj_type, now_str);
+        db_->insert_smart_detect_track(ex_trk_id, ex_event_id,
+                                       ev.camera_ip, ts_ms, ts_ms,
+                                       ex_obj_type, 0, now_str);
+        {
+          std::vector<std::string> lnames = {
+            "eventType:smartDetectZone",
+            "smartDetectType:" + ex_obj_type,
+          };
+          if (!cam_uuid.empty()) {
+            lnames.push_back("camera:" + cam_uuid);
+            lnames.push_back("zone:" + cam_uuid + ":1");
+          }
+          auto lids = db_->upsert_labels(lnames, now_str);
+          if (!lids.empty()) {
+            if (ex_coalesced.empty())
+              db_->insert_detection_label(ex_event_id, "", lids, now_str);
+            db_->insert_detection_label(ex_event_id, ex_sdo_id,
+                                       lids, now_str);
+          }
+        }
+        if (!ex_snapshot.empty())
+          db_->write_thumbnail(ex_thumb_id, ex_event_id, ev.camera_ip,
+                               ts_ms, now_str, ex_snapshot);
+      }
+
+      if (ex_coalesced.empty()) {
+        if (alarm_notif && !cam_mac.empty())
+          alarm_notif->notify(ex_obj_type, cam_mac, ex_event_id, ts_ms);
+        if (webhook_notif)
+          webhook_notif->notify(ex_obj_type, ev.camera_ip,
+                                ex_event_id, ts_ms);
+      }
+    }  // end extra_types loop
 
   } else {
     // Detection ended -- UPDATE the open events row with end time + updatedAt.
